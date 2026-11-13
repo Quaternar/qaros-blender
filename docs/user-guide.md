@@ -89,7 +89,7 @@ While streaming, every user sees a **Blender** panel beside the app volume. It e
 
 | Gesture | Effect |
 |---|---|
-| Click an object | selects it and makes it active; your one-hand drag now moves that object |
+| Click an object | selects it and makes it active; your one-hand drag now moves that object. A child moves in world space and keeps its parent; a collection instance selects and moves the object that instances it |
 | Click empty space | clears your selection; your one-hand drag moves the scene again |
 | Two-hand scale or rotate | the scene, always |
 

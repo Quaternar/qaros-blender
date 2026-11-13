@@ -86,5 +86,33 @@ class PageFolderTests(unittest.TestCase):
         self.assertRegex(panel.BUNDLE_NAME, r"^[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}$")
 
 
+class RecordingRuntime:
+    """Answers every call with success and keeps the panel id and bundle each one was given."""
+
+    def __init__(self):
+        self.calls = []
+
+    def call(self, name, *args):
+        if name == "qar_impl_panel_content_publish_directory":
+            args[3]._obj.name = b"blender"
+            args[3]._obj.publisher.data[0] = 7  # this run's peer
+        if name == "qar_impl_gui_panels_get_or_create":
+            args[2]._obj.data[0] = 42  # the panel an earlier run left
+        self.calls.append((name, args))
+
+
+class ServedContentTests(unittest.TestCase):
+    def test_a_panel_an_earlier_run_left_is_pointed_at_this_runs_bundle(self):
+        runtime = RecordingRuntime()
+        served = panel.ServedPanel(runtime, 1, 2, "blender")
+        names = [name for name, _ in runtime.calls]
+        self.assertLess(names.index("qar_impl_gui_panels_get_or_create"), names.index("qar_impl_gui_panels_set_served_content"))
+        _, args = next(call for call in runtime.calls if call[0] == "qar_impl_gui_panels_set_served_content")
+        self.assertEqual(args[1]._obj.data[0], 42)
+        self.assertEqual(args[2]._obj.publisher.data[0], 7)
+        self.assertEqual(args[3], panel.ENTRY.encode())
+        self.assertIs(served.panel, args[1]._obj)
+
+
 if __name__ == "__main__":
     unittest.main()

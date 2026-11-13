@@ -140,6 +140,7 @@ _FUNCTIONS = {
     "qar_impl_panel_content_publish_directory": (Result, [_P, ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(BundleId)]),
     "qar_impl_panel_content_remove": (Result, [_P, ctypes.POINTER(BundleId)]),
     "qar_impl_gui_panels_get_or_create": (Result, [_P, ctypes.POINTER(PanelInit), ctypes.POINTER(Id)]),
+    "qar_impl_gui_panels_set_served_content": (Result, [_P, ctypes.POINTER(Id), ctypes.POINTER(BundleId), ctypes.c_char_p]),
     "qar_impl_gui_panels_close_panel": (Result, [_P, ctypes.POINTER(Id)]),
     "qar_impl_app_volume_get_latest_pose": (Result, [_P, _P, ctypes.POINTER(Pose)]),
     "qar_impl_app_volume_get_latest_size": (Result, [_P, _P, ctypes.POINTER(VolumeSize)]),
@@ -305,6 +306,15 @@ class ServedPanel:
         init.size = PanelSize(PANEL_SIZE[0], PANEL_SIZE[1], 1.0)
         panel = Id()
         self.runtime.call("qar_impl_gui_panels_get_or_create", self.session, ctypes.byref(init), ctypes.byref(panel))
+        # A panel an earlier run left keeps its init, so its page would name that run's bundle,
+        # published by a peer that is gone: the panel would stay blank. Point it at this run's.
+        self.runtime.call(
+            "qar_impl_gui_panels_set_served_content",
+            self.session,
+            ctypes.byref(panel),
+            ctypes.byref(self.bundle),
+            ENTRY.encode(),
+        )
         return panel
 
     def subscribe(self, handler):

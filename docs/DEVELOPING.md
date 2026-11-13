@@ -64,9 +64,13 @@ sequenceDiagram
   advertised capabilities decide what each backend gets.
 - **Controls panel** (`panel.py`, `controls.py`, `protocol.py`, `blender_panels.py`): the page is
   served over the device's session. Edits are queued per control on the QAR thread and applied by
-  the UI thread every 50 ms, latest value first; a released drag is one undo step.
+  the UI thread every 50 ms, latest value first; a released drag is one undo step. The panel keeps
+  its id across runs (common name per app volume), so every run points it at its own bundle again:
+  a panel an earlier run left would otherwise name a publisher that is gone and stay blank.
 - **Pointing** (`pointing.py`): a click selects by Blender's ray cast and switches that user's
-  one-hand drag to the object.
+  one-hand drag to the object. The ray cast reports a collection instance as its prototype; the
+  pick maps it to the instancing object through the depsgraph's instances (matched by matrix), so
+  a drag never moves the prototype inside every instance.
 - **Stop from QAROS** (`hub_launch.py`): a QAROS launcher stops an app by closing its stdin, asking
   it to close and terminating it one second later. When QAROS started Blender (`QAR_INSTANCE` set,
   stdin a pipe), the add-on watches stdin and quits Blender at once; Blender writes `quit.blend`

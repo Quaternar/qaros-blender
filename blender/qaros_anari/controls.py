@@ -156,13 +156,36 @@ def push_undo():
 
 
 def pick(origin, direction):
-    """The object Blender's ray cast hits first, by name, or None."""
+    """The object Blender's ray cast hits first, by name, or None. A hit on an instance (a
+    collection instance, instancing on faces or vertices) picks the object that instances it, the one
+    a user can select and move: the ray cast names the instanced prototype, which may not even be in
+    the view layer, and moving it would move it in every instance."""
     scene = bpy.context.scene
     depsgraph = bpy.context.evaluated_depsgraph_get()
-    hit, _location, _normal, _index, obj, _matrix = scene.ray_cast(depsgraph, Vector(origin), Vector(direction))
+    hit, _location, _normal, _index, obj, matrix = scene.ray_cast(depsgraph, Vector(origin), Vector(direction))
     if not hit or obj is None:
         return None
-    return obj.original.name
+    instancer = instancer_of(depsgraph, obj, matrix)
+    return (instancer or obj).original.name
+
+
+INSTANCE_MATRIX_TOLERANCE = 1.0e-5
+
+
+def instancer_of(depsgraph, obj, matrix):
+    """The object whose instancing put `obj` at `matrix`, or None when the hit is `obj` itself."""
+    if obj.original.name in bpy.context.view_layer.objects and _same_matrix(obj.matrix_world, matrix):
+        return None
+    for instance in depsgraph.object_instances:
+        if not instance.is_instance or instance.object.original != obj.original:
+            continue
+        if _same_matrix(instance.matrix_world, matrix):
+            return instance.parent
+    return None
+
+
+def _same_matrix(a, b):
+    return all(abs(x - y) <= INSTANCE_MATRIX_TOLERANCE for row_a, row_b in zip(a, b) for x, y in zip(row_a, row_b))
 
 
 def select_only(name):
