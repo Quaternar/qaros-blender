@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blender</title>
+<link rel="stylesheet" href="style.css">
+<script src="qaros-panel-dev-shim.js"></script>
+<script src="app.js" defer></script>
+</head>
+<body>
+<header>
+  <span id="object-name" class="name">No object</span>
+  <button id="undo" class="icon" title="Undo">&#x21B6;</button>
+  <button id="redo" class="icon" title="Redo">&#x21B7;</button>
+</header>
+<nav class="tabs" id="tabs">
+  <button data-tab="object" class="active">Object</button>
+  <button data-tab="material">Material</button>
+  <button data-tab="frame">Frame</button>
+  <button data-tab="panels">Panels</button>
+</nav>
+<p id="no-tabs" class="note" hidden>Every tab is switched off in the add-on's preferences.</p>
+
+<section id="tab-object" class="tab active">
+  <nav class="segments" id="groups">
+    <button data-group="location" class="active">Location</button>
+    <button data-group="rotation">Rotation</button>
+    <button data-group="scale">Scale</button>
+  </nav>
+  <div id="rows-object"></div>
+  <p id="object-note" class="note"></p>
+</section>
+
+<section id="tab-material" class="tab">
+  <div class="title-row"><span id="material-name" class="name">No material</span><span id="swatch" class="swatch"></span></div>
+  <div id="rows-material"></div>
+  <p id="material-note" class="note"></p>
+</section>
+
+<section id="tab-panels" class="tab">
+  <nav class="segments" id="panel-names"></nav>
+  <div id="panel-body" class="scroll"></div>
+</section>
+
+<section id="tab-frame" class="tab">
+  <div class="frame-number" id="frame-number">-</div>
+  <div id="rows-frame"></div>
+  <button id="play" class="wide">Play</button>
+</section>
+</body>
+</html>

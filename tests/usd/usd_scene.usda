@@ -1,0 +1,199 @@
+#usda 1.0
+(
+    defaultPrim = "World"
+    metersPerUnit = 0.01
+    upAxis = "Y"
+    startTimeCode = 1
+    endTimeCode = 49
+    timeCodesPerSecond = 24
+)
+
+# What test_blender_usd_scene.py streams: one of each USD feature the Blender add-on corrects or
+# relies on, laid out on a 2 m floor so a camera from above sees each one. Centimetres, Y up.
+#   (-50, -50) gold sphere: a shape with a bound material
+#   ( 50, -50) green cylinder: a shape in a referenced layer
+#   (-50,  50) orange cube: displayColor, no material
+#   ( 50,  50) blue cube at opacity 0.4, 1 cm above the grey floor: a face coplanar with the
+#              floor let a ray step past it, leaving partial alpha (seen on OSPRay)
+#   (  0,   0) three red boxes from a point instancer
+#   (  0, -80) a blade turning about Y over frames 1-49
+# A normalized sun shines straight down (USD lights default to normalize = false).
+def Xform "World"
+{
+    def Mesh "Floor" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 3, 2, 1]
+        point3f[] points = [(-100, 0, -100), (100, 0, -100), (100, 0, 100), (-100, 0, 100)]
+        uniform token subdivisionScheme = "none"
+        rel material:binding = </World/Looks/Grey>
+    }
+
+    def Sphere "GoldSphere" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {
+        double radius = 15
+        rel material:binding = </World/Looks/Gold>
+        double3 xformOp:translate = (-50, 15, -50)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+
+    def Xform "Prop" (
+        prepend references = @./usd_prop.usda@
+    )
+    {
+        double3 xformOp:translate = (50, 0, -50)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+
+    def Mesh "PlainOrange"
+    {
+        int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+        int[] faceVertexIndices = [0, 1, 3, 2, 4, 6, 7, 5, 0, 4, 5, 1, 2, 3, 7, 6, 0, 2, 6, 4, 1, 5, 7, 3]
+        point3f[] points = [(-15, -15, -15), (-15, -15, 15), (-15, 15, -15), (-15, 15, 15), (15, -15, -15), (15, -15, 15), (15, 15, -15), (15, 15, 15)]
+        color3f[] primvars:displayColor = [(1, 0.5, 0)] (
+            interpolation = "constant"
+        )
+        uniform token subdivisionScheme = "none"
+        double3 xformOp:translate = (-50, 15, 50)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+
+    def Mesh "Glass" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {
+        int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+        int[] faceVertexIndices = [0, 1, 3, 2, 4, 6, 7, 5, 0, 4, 5, 1, 2, 3, 7, 6, 0, 2, 6, 4, 1, 5, 7, 3]
+        point3f[] points = [(-15, -15, -15), (-15, -15, 15), (-15, 15, -15), (-15, 15, 15), (15, -15, -15), (15, -15, 15), (15, 15, -15), (15, 15, 15)]
+        uniform token subdivisionScheme = "none"
+        rel material:binding = </World/Looks/BlueGlass>
+        double3 xformOp:translate = (50, 16, 50)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+
+    def PointInstancer "Crowd"
+    {
+        point3f[] positions = [(-20, 5, 0), (0, 5, 0), (20, 5, 0)]
+        int[] protoIndices = [0, 0, 0]
+        rel prototypes = </World/Crowd/Prototypes/Box>
+
+        def Scope "Prototypes"
+        {
+            def Mesh "Box" (
+                prepend apiSchemas = ["MaterialBindingAPI"]
+            )
+            {
+                int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+                int[] faceVertexIndices = [0, 1, 3, 2, 4, 6, 7, 5, 0, 4, 5, 1, 2, 3, 7, 6, 0, 2, 6, 4, 1, 5, 7, 3]
+                point3f[] points = [(-5, -5, -5), (-5, -5, 5), (-5, 5, -5), (-5, 5, 5), (5, -5, -5), (5, -5, 5), (5, 5, -5), (5, 5, 5)]
+                uniform token subdivisionScheme = "none"
+                rel material:binding = </World/Looks/Red>
+            }
+        }
+    }
+
+    def Xform "Spinner"
+    {
+        float xformOp:rotateY.timeSamples = {
+            1: 0,
+            13: 90,
+            25: 180,
+            49: 360,
+        }
+        double3 xformOp:translate = (0, 2, -80)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateY"]
+
+        def Mesh "Blade" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 3, 2, 4, 6, 7, 5, 0, 4, 5, 1, 2, 3, 7, 6, 0, 2, 6, 4, 1, 5, 7, 3]
+            point3f[] points = [(-30, -2, -5), (-30, -2, 5), (-30, 2, -5), (-30, 2, 5), (30, -2, -5), (30, -2, 5), (30, 2, -5), (30, 2, 5)]
+            uniform token subdivisionScheme = "none"
+            rel material:binding = </World/Looks/White>
+        }
+    }
+
+    def DistantLight "Sun"
+    {
+        float inputs:intensity = 0.75
+        bool inputs:normalize = 1
+        float3 xformOp:rotateXYZ = (-90, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:rotateXYZ"]
+    }
+
+    def Scope "Looks"
+    {
+        def Material "Grey"
+        {
+            token outputs:surface.connect = </World/Looks/Grey/Preview.outputs:surface>
+
+            def Shader "Preview"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.5, 0.5, 0.5)
+                float inputs:roughness = 1
+                token outputs:surface
+            }
+        }
+
+        def Material "Gold"
+        {
+            token outputs:surface.connect = </World/Looks/Gold/Preview.outputs:surface>
+
+            def Shader "Preview"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (1, 0.77, 0.34)
+                float inputs:metallic = 1
+                float inputs:roughness = 0.5
+                token outputs:surface
+            }
+        }
+
+        def Material "BlueGlass"
+        {
+            token outputs:surface.connect = </World/Looks/BlueGlass/Preview.outputs:surface>
+
+            def Shader "Preview"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.05, 0.1, 0.9)
+                float inputs:opacity = 0.4
+                float inputs:roughness = 0.8
+                token outputs:surface
+            }
+        }
+
+        def Material "Red"
+        {
+            token outputs:surface.connect = </World/Looks/Red/Preview.outputs:surface>
+
+            def Shader "Preview"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.9, 0.05, 0.05)
+                float inputs:roughness = 0.8
+                token outputs:surface
+            }
+        }
+
+        def Material "White"
+        {
+            token outputs:surface.connect = </World/Looks/White/Preview.outputs:surface>
+
+            def Shader "Preview"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.9, 0.9, 0.9)
+                float inputs:roughness = 0.8
+                token outputs:surface
+            }
+        }
+    }
+}
