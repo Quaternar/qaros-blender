@@ -42,7 +42,7 @@ The credit is on the stand's plaque; keep it when you show or share the demo
 | QAROS | a build or release with **served GUI panels** for the controls panel (today: branch `feat/anari-blender-served-panel` or `staging/main-with-headset` of Quaternar; QAROS 0.9.0 streams the engine but shows no panel) and the **ANARI device** |
 | Blender | 4.5 LTS or newer (checked with 5.2) |
 | Add-on | **QAROS ANARI Streaming** from this repository: installed in Blender, or the checkout's `blender` folder passed with `--addon-dir` |
-| Headset (optional) | paired with this QAROS; see [Pair a headset](https://docs.quaternar.com/docs/operator-guide/visualizer-tutorials/pair-a-headset) |
+| Headset (optional) | paired with this QAROS; see [Onboarding devices](https://docs.quaternar.com/docs/user-guide/onboarding-devices/) |
 
 ## Start it
 
@@ -99,7 +99,7 @@ Start Blender **from the Visualizer**, so it joins that build's hub and no other
 
 ### Headset
 
-Pair the headset with this QAROS before the demo ([Pair a headset](https://docs.quaternar.com/docs/operator-guide/visualizer-tutorials/pair-a-headset)).
+Pair the headset with this QAROS before the demo ([Onboarding devices](https://docs.quaternar.com/docs/user-guide/onboarding-devices/)).
 The engine and its panel appear in the shared space for every paired user; up to two users are
 streamed at once (add-on preference **Users**).
 
