@@ -53,7 +53,7 @@ class Preferences(bpy.types.AddonPreferences):
 
     anari_folder: bpy.props.StringProperty(
         name="ANARI folder",
-        description="Folder with anari.dll and anari_library_qaros.dll. Empty: the QAROS setup's ANARI component on the system path",
+        description="Folder with anari.dll and anari_library_qaros.dll. Empty: the ANARI device of the QAROS that started Blender, else the QAROS setup's ANARI component on the system path",
         subtype="DIR_PATH",
     )
     backend: bpy.props.EnumProperty(

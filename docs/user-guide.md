@@ -123,7 +123,7 @@ Blender's own **File → Import → Universal Scene Description** gets the first
 
 | Setting | Default | Meaning | Applies |
 |---|---|---|---|
-| **ANARI folder** | empty | folder with `anari.dll` and `anari_library_qaros.dll`; empty uses the installed ANARI device | after a Blender restart |
+| **ANARI folder** | empty | folder with `anari.dll` and `anari_library_qaros.dll`; empty uses the ANARI device of the QAROS that started Blender, else the installed one on the system `PATH` | after a Blender restart |
 | **Backend** | Automatic | the renderer, see [Backends](#backends) | after a Blender restart |
 | **Users** | 2 | how many headsets and visualizers can watch at once | next start |
 | **Frame rate** | 30 | stereo pairs per second per user | next start |

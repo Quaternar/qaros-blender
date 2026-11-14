@@ -16,3 +16,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
 - Pointing into the app volume selects an object and moves it with a one-hand drag.
 - **File → Import → USD for QAROS** keeps shape materials, opacity and light radii of USD scenes.
 - A Blender started from QAROS quits when QAROS stops it, saving `quit.blend` first.
+- With **ANARI folder** empty, the add-on loads the ANARI device of the QAROS that started Blender
+  (`QAR_ANARI_FOLDER`), else the first folder on the system `PATH` holding `anari.dll` and
+  `anari_library_qaros.dll`.

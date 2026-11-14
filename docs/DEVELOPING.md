@@ -19,7 +19,7 @@ The add-on ships no native code. It loads, through `ctypes`:
 
 | Library | From | Used for |
 |---|---|---|
-| `anari.dll`, `anari_library_qaros.dll` | QAROS setup, `anari\` (on the system `PATH`), or **ANARI folder** | the scene: device, objects, materials, lights, `qar.*` parameters |
+| `anari.dll`, `anari_library_qaros.dll` | **ANARI folder**, else `QAR_ANARI_FOLDER` (set by the QAROS that started Blender), else the first `PATH` entry holding both (the QAROS setup's `anari\`) | the scene: device, objects, materials, lights, `qar.*` parameters |
 | the QAR runtime (`qar-streaming-c`) | the path the device reports (`qar.runtimeLibrary`) | controls panel, gestures, on the device's own session |
 
 - The C structures in `panel.py` and `pointing.py` follow the public C API header
