@@ -83,6 +83,10 @@ sequenceDiagram
   command line is loaded first). `1`, `true`, `on`, `yes` (any case) switch it on; `0`, `false`,
   `off`, `no` or unset leave it off; any other text is off with a warning in the console. A failed
   Start is not repeated, and a Start the user pressed first is not doubled.
+- **Preferences under `--addons`**: `--addons` enables the add-on for the session without adding it
+  to Blender's preferences, so a Blender whose preferences never enabled it has no entry for it.
+  `preferences()` then answers the declared defaults (`hub_launch.preference_defaults`), kept for
+  the session, and never writes the add-on into the user's preferences.
 
 ## Developing against a hub from a QAROS build
 
@@ -100,9 +104,9 @@ python tools/run_tests.py --group unit                      # plain Python only
 python tools/run_tests.py --anari-folder <build>\qar-anari-device\bin --backend visgl
 ```
 
-- `unit` runs everywhere. `blender` needs Blender (found on `PATH` or in Program Files, or
-  `--blender`). `device` also needs a device folder: the installed QAROS's `anari` folder by
-  default.
+- `unit` runs everywhere. `blender` needs Blender (`--blender`, else `QAR_TEST_BLENDER_EXECUTABLE`,
+  else `PATH`, else Program Files). `device` also needs a device folder: the installed QAROS's
+  `anari` folder by default.
 - Device tests run with streaming off (`QAR_ANARI_STREAM=0`) on `--backend` (default `helide`). A
   test exits 77 (skipped) when the backend cannot run on this PC, for example VisGL without
   hardware OpenGL.

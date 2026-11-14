@@ -13,7 +13,14 @@ import bpy
 from bpy.app.handlers import persistent
 
 from . import anari, blender_panels, usd_import
-from .hub_launch import AutoStartOnce, StopRequestWatcher, auto_start_requested, started_by_hub, stdin_is_pipe
+from .hub_launch import (
+    AutoStartOnce,
+    StopRequestWatcher,
+    auto_start_requested,
+    preference_defaults,
+    started_by_hub,
+    stdin_is_pipe,
+)
 from .controls import Controls
 from .protocol import panel_names, toggled_panel
 from .materials import material_descriptions
@@ -194,8 +201,22 @@ def render_scale_parameter(value):
     return min(1.0, max(RENDER_SCALE_MIN, value))
 
 
+# The preferences of a session whose Blender preferences do not list the add-on: built once, so the
+# controls panel choices made in that session (toggle, reset) hold until Blender quits.
+SESSION_PREFERENCES = None
+
+
 def preferences():
-    return bpy.context.preferences.addons[__package__].preferences
+    """The add-on's preferences, or their defaults when Blender's preferences do not list the add-on:
+    loaded by ``--addons`` alone (a Blender QAROS started whose preferences never enabled it), it
+    has no entry there (hub_launch.preference_defaults)."""
+    global SESSION_PREFERENCES
+    entry = bpy.context.preferences.addons.get(__package__)
+    if entry is not None:
+        return entry.preferences
+    if SESSION_PREFERENCES is None:
+        SESSION_PREFERENCES = preference_defaults(Preferences.__annotations__)
+    return SESSION_PREFERENCES
 
 
 class Streamer:

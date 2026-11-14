@@ -20,6 +20,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follo
   `QAR_BLENDER_AUTO_START=1` (also `true`, `on`, `yes`) the add-on presses **Start streaming** once
   after Blender has loaded. Off words (`0`, `false`, `off`, `no`) or no value keep the button; other
   text is off with a warning. A failed start is not retried.
+- A Blender started with `--addons qaros_anari` alone (QAROS starts Blender so) streams with the
+  preferences' defaults when Blender's preferences do not list the add-on, as in a portable or
+  never-started Blender, instead of failing with `key "qaros_anari" not found`.
 - With **ANARI folder** empty, the add-on loads the ANARI device of the QAROS that started Blender
   (`QAR_ANARI_FOLDER`), else the first folder on the system `PATH` holding `anari.dll` and
   `anari_library_qaros.dll`.

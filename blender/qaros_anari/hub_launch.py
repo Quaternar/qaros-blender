@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
-"""How a Blender that QAROS started learns that QAROS stops it, and whether to start streaming by
-itself. No bpy here, so it is tested with plain Python.
+"""How a Blender that QAROS started learns that QAROS stops it, whether to start streaming by
+itself, and which preferences apply when its preferences do not list the add-on. No bpy here, so it
+is tested with plain Python.
 
 A hub's launcher stops an app by closing its stdin, asking it to close and, one second later,
 terminating it (docs/DEVELOPING.md). Blender treats neither the closed stdin nor the
@@ -10,6 +11,7 @@ import os
 import stat
 import sys
 import threading
+from types import SimpleNamespace
 
 
 def stdin_is_pipe(stream=None):
@@ -115,3 +117,24 @@ class AutoStartOnce:
             return False
         self._pending = False
         return not running
+
+
+# Blender's own value for a property declared without a default, by property function.
+PROPERTY_ZERO = {"StringProperty": "", "BoolProperty": False, "IntProperty": 0, "FloatProperty": 0.0}
+
+
+def preference_defaults(annotations):
+    """The add-on's preferences as the user would find them unchanged: each declared property's
+    `default`, else Blender's zero for its type. ``annotations`` maps a name to the deferred
+    property of the AddonPreferences class (``function`` and ``keywords``).
+
+    QAROS starts Blender with ``--addons qaros_anari``, which enables the add-on for the session
+    without adding it to the preferences (``addon_utils.enable`` without ``default_set``). A Blender
+    whose preferences never enabled it, a portable or never-started one among them, then has no
+    preferences entry for the add-on, and these values apply."""
+    values = {}
+    for name, prop in annotations.items():
+        keywords = getattr(prop, "keywords", None) or {}
+        function = getattr(getattr(prop, "function", None), "__name__", "")
+        values[name] = keywords["default"] if "default" in keywords else PROPERTY_ZERO.get(function)
+    return SimpleNamespace(**values)

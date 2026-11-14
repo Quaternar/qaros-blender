@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: MIT
 """The Blender add-on's stop detection and automatic Start (qaros_anari/hub_launch.py), with plain
 Python: a Blender that QAROS started quits when QAROS closes its stdin; one started by hand never
-does. One started from the Blender tile starts streaming by itself, once."""
+does. One started from the Blender tile starts streaming by itself, once, also when its preferences
+do not list the add-on."""
 import importlib.util
 import os
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 path = Path(__file__).resolve().parents[1] / "blender" / "qaros_anari" / "hub_launch.py"
@@ -101,6 +103,30 @@ class AutoStartOnceTests(unittest.TestCase):
         auto_start = hub_launch.AutoStartOnce(True)
         self.assertFalse(auto_start.take(running=True))
         self.assertFalse(auto_start.take(running=False), "a Stop afterwards does not start it again")
+
+
+class PreferenceDefaultsTests(unittest.TestCase):
+    """Blender's deferred properties carry the property function and its keywords."""
+
+    @staticmethod
+    def deferred(function_name, **keywords):
+        function = type(function_name, (), {})
+        function.__name__ = function_name
+        return SimpleNamespace(function=function, keywords=keywords)
+
+    def test_declared_defaults_else_the_types_zero(self):
+        defaults = hub_launch.preference_defaults({
+            "anari_folder": self.deferred("StringProperty", name="ANARI folder", subtype="DIR_PATH"),
+            "backend": self.deferred("EnumProperty", items=(), default="auto"),
+            "max_users": self.deferred("IntProperty", default=2, min=1),
+            "render_scale": self.deferred("FloatProperty", default=0.0),
+            "enabled": self.deferred("BoolProperty"),
+        })
+        self.assertEqual(defaults.anari_folder, "")
+        self.assertEqual(defaults.backend, "auto")
+        self.assertEqual(defaults.max_users, 2)
+        self.assertEqual(defaults.render_scale, 0.0)
+        self.assertIs(defaults.enabled, False)
 
 
 if __name__ == "__main__":
