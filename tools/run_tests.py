@@ -11,7 +11,8 @@ Groups (all by default; a group whose requirement is missing is skipped and repo
 | unit    | Python 3.11+                            | protocol, panel, pointing, volume names, hub stop, |
 |         |                                         | auto-start, ANARI folder lookup                    |
 | blender | Blender                                 | panel replay, pointing in a scene, USD import,     |
-|         |                                         | add-on started by --addons alone                   |
+|         |                                         | add-on started by --addons alone, ZIP installed    |
+|         |                                         | from disk and started as the Blender tile does     |
 | device  | Blender and a qaros ANARI device folder | ctypes binding, scene sync, USD scene rendered     |
 
 The device folder holds anari.dll and anari_library_qaros.dll: the installed QAROS's `anari`
@@ -33,6 +34,8 @@ UNIT = ["test_blender_helper.py", "test_blender_hub_launch.py", "test_blender_an
         "test_blender_panel.py", "test_blender_controls_protocol.py", "test_blender_pointing.py"]
 BLENDER = ["test_blender_panel_replay.py", "test_blender_pointing_scene.py", "test_blender_usd_import.py",
            "test_blender_addon_launch.py"]
+# Plain Python driving Blender processes of its own (--blender).
+BLENDER_DRIVER = ["test_blender_addon_install.py"]
 DEVICE_PYTHON = ["test_blender_addon_binding.py"]
 DEVICE_BLENDER = ["test_blender_addon_sync.py", "test_blender_usd_scene.py"]
 
@@ -104,6 +107,8 @@ def main() -> int:
         else:
             for script in BLENDER:
                 results[script] = run(script, blender_command(blender, script))
+            for script in BLENDER_DRIVER:
+                results[script] = run(script, [sys.executable, "-I", str(TESTS / script), "--blender", str(blender)])
     if "device" in groups:
         if blender is None or anari_folder is None:
             print("device group skipped: needs Blender and an ANARI device folder (--blender, --anari-folder)")
