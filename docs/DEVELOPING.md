@@ -65,8 +65,10 @@ sequenceDiagram
 - **Controls panel** (`panel.py`, `controls.py`, `protocol.py`, `blender_panels.py`): the page is
   served over the device's session. Edits are queued per control on the QAR thread and applied by
   the UI thread every 50 ms, latest value first; a released drag is one undo step. The panel keeps
-  its id across runs (common name per app volume), so every run points it at its own bundle again:
-  a panel an earlier run left would otherwise name a publisher that is gone and stay blank.
+  its id across runs (common name per app volume). A panel an earlier run left open (Blender
+  crashed, or the hub restarted under it) is taken over by `get_or_create`, which keeps its place
+  and points it at this run's bundle; a runtime from before that rule leaves such a panel on the
+  earlier run's bundle, shown as "Page not available".
 - **Pointing** (`pointing.py`): a click selects by Blender's ray cast and switches that user's
   one-hand drag to the object. The ray cast reports a collection instance as its prototype; the
   pick maps it to the instancing object through the depsgraph's instances (matched by matrix), so

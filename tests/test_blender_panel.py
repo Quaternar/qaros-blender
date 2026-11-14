@@ -87,31 +87,34 @@ class PageFolderTests(unittest.TestCase):
 
 
 class RecordingRuntime:
-    """Answers every call with success and keeps the panel id and bundle each one was given."""
+    """Answers every call with success; keeps the call names and the served page get_or_create
+    was given (read during the call: the extension lives only as long as it)."""
 
     def __init__(self):
         self.calls = []
+        self.asked = None
 
     def call(self, name, *args):
         if name == "qar_impl_panel_content_publish_directory":
             args[3]._obj.name = b"blender"
             args[3]._obj.publisher.data[0] = 7  # this run's peer
         if name == "qar_impl_gui_panels_get_or_create":
-            args[2]._obj.data[0] = 42  # the panel an earlier run left
-        self.calls.append((name, args))
+            init = args[1]._obj
+            ext = ctypes.cast(init.header.next, ctypes.POINTER(panel.ServedContentExt)).contents
+            self.asked = (ext.bundle.publisher.data[0], ext.bundle.name, ext.entry)
+            args[2]._obj.data[0] = 42  # the panel an earlier run may have left
+        self.calls.append(name)
 
 
 class ServedContentTests(unittest.TestCase):
-    def test_a_panel_an_earlier_run_left_is_pointed_at_this_runs_bundle(self):
+    def test_the_panel_is_opened_on_this_runs_bundle_in_one_call(self):
+        # The runtime takes over a panel an earlier run left and points it at the bundle named
+        # here, so no second call is needed.
         runtime = RecordingRuntime()
         served = panel.ServedPanel(runtime, 1, 2, "blender")
-        names = [name for name, _ in runtime.calls]
-        self.assertLess(names.index("qar_impl_gui_panels_get_or_create"), names.index("qar_impl_gui_panels_set_served_content"))
-        _, args = next(call for call in runtime.calls if call[0] == "qar_impl_gui_panels_set_served_content")
-        self.assertEqual(args[1]._obj.data[0], 42)
-        self.assertEqual(args[2]._obj.publisher.data[0], 7)
-        self.assertEqual(args[3], panel.ENTRY.encode())
-        self.assertIs(served.panel, args[1]._obj)
+        self.assertEqual(runtime.asked, (7, b"blender", panel.ENTRY.encode()))
+        self.assertNotIn("qar_impl_gui_panels_set_served_content", runtime.calls)
+        self.assertEqual(served.panel.data[0], 42)
 
 
 if __name__ == "__main__":
