@@ -31,6 +31,7 @@ flowchart LR
 | Page | For |
 |---|---|
 | [User guide](docs/user-guide.md) | setup, app volume, backends, preferences, materials, troubleshooting, limits |
+| [Demo](demo/README.md) | a turbofan engine demo on VisGL to pull apart in the headset, with a start guide for presenting it |
 | [Developing](docs/DEVELOPING.md) | how the add-on works, repository layout, tests, building the ZIP, releasing |
 | [Changelog](CHANGELOG.md) | changes per version |
 
