@@ -51,7 +51,7 @@ Pick the way that matches your QAROS.
 ### A: QAROS installed (setup)
 
 1. Install the add-on once: build its ZIP in this repository (`python tools/build_zip.py`, writes
-   `dist/qaros_anari.zip`) or download it from the
+   `dist/qaros_anari.zip`) or download `qaros_anari-<version>.zip` from the
    [Releases](https://github.com/Quaternar/qaros-blender/releases), then in Blender **Edit →
    Preferences → Add-ons → Install from Disk**, pick the ZIP and enable **QAROS ANARI Streaming**.
    Leave **ANARI folder** empty.
