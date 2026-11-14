@@ -13,7 +13,7 @@ import bpy
 from bpy.app.handlers import persistent
 
 from . import anari, blender_panels, usd_import
-from .hub_launch import StopRequestWatcher, started_by_hub, stdin_is_pipe
+from .hub_launch import AutoStartOnce, StopRequestWatcher, auto_start_requested, started_by_hub, stdin_is_pipe
 from .controls import Controls
 from .protocol import panel_names, toggled_panel
 from .materials import material_descriptions
@@ -36,6 +36,9 @@ PUBLISH_FRAME_SIZE = (16, 16)
 # How often Blender's thread looks for a stop request from QAROS. The launcher terminates the app one
 # second after asking, so the quit has to start well inside that.
 STOP_POLL_INTERVAL = 0.1
+# Seconds after the add-on registered before the automatic Start: Blender's event loop runs timers
+# only once the startup file and any file named on the command line are loaded.
+AUTO_START_DELAY = 0.5
 # How often Blender's thread looks whether the stream runs, to open the controls panel beside it.
 PANEL_POLL_INTERVAL = 0.5
 
@@ -630,6 +633,39 @@ def watch_for_hub_stop():
     bpy.app.timers.register(quit_when_hub_stops, first_interval=STOP_POLL_INTERVAL, persistent=True)
 
 
+# Set when the Blender tile started this Blender (QAR_BLENDER_AUTO_START): Start is pressed once by
+# itself. Kept across a disable and enable of the add-on, so that never starts streaming again.
+AUTO_START = None
+
+
+def auto_start_streaming():
+    """The automatic Start, once, through the same operator as the panel's button. A Start that
+    fails, or a join that fails later, is left to the user as without auto-start."""
+    if not AUTO_START.take(STREAMER.running):
+        return None
+    log("QAROS started Blender to stream: starting streaming")
+    windows = list(bpy.context.window_manager.windows)
+    try:
+        if windows:
+            with bpy.context.temp_override(window=windows[0]):
+                bpy.ops.qaros.start_streaming("EXEC_DEFAULT")
+        else:
+            bpy.ops.qaros.start_streaming("EXEC_DEFAULT")
+    except RuntimeError as error:
+        # The operator's error report, also shown in the panel (STREAMER.error).
+        log(f"automatic start failed: {error}")
+    return None
+
+
+def schedule_auto_start():
+    global AUTO_START
+    if AUTO_START is None:
+        AUTO_START = AutoStartOnce(auto_start_requested(os.environ, log))
+    if AUTO_START.pending and not bpy.app.timers.is_registered(auto_start_streaming):
+        # Persistent: a file named on Blender's command line loads after the add-on registered.
+        bpy.app.timers.register(auto_start_streaming, first_interval=AUTO_START_DELAY, persistent=True)
+
+
 def register():
     for cls in CLASSES:
         bpy.utils.register_class(cls)
@@ -644,6 +680,7 @@ def register():
     bpy.app.timers.register(redraw_panels, first_interval=1.0, persistent=True)
     atexit.register(stop_at_exit)
     watch_for_hub_stop()
+    schedule_auto_start()
 
 
 def unregister():
@@ -653,6 +690,8 @@ def unregister():
         bpy.app.timers.unregister(redraw_panels)
     if bpy.app.timers.is_registered(quit_when_hub_stops):
         bpy.app.timers.unregister(quit_when_hub_stops)
+    if bpy.app.timers.is_registered(auto_start_streaming):
+        bpy.app.timers.unregister(auto_start_streaming)
     del bpy.types.Scene.qaros_volume_name
     usd_import.unregister()
     for cls in reversed(CLASSES):

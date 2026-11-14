@@ -77,6 +77,12 @@ sequenceDiagram
   it to close and terminating it one second later. When QAROS started Blender (`QAR_INSTANCE` set,
   stdin a pipe), the add-on watches stdin and quits Blender at once; Blender writes `quit.blend`
   first. A Blender started by hand never quits on its own.
+- **Start from the Blender tile** (`hub_launch.py`): the QAROS Visualizer's Blender tile starts
+  Blender with `--addons qaros_anari` and `QAR_BLENDER_AUTO_START=1`. The add-on then presses
+  **Start streaming** once, 0.5 s after it registered (a persistent timer, so a `.blend` named on the
+  command line is loaded first). `1`, `true`, `on`, `yes` (any case) switch it on; `0`, `false`,
+  `off`, `no` or unset leave it off; any other text is off with a warning in the console. A failed
+  Start is not repeated, and a Start the user pressed first is not doubled.
 
 ## Developing against a hub from a QAROS build
 

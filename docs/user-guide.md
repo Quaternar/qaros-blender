@@ -45,6 +45,8 @@ While streaming, the **QAROS** tab shows:
 
 ### Start Blender from QAROS
 
+The visualizer's **Blender** tile in [Source Applications](https://docs.quaternar.com/docs/operator-guide/source-applications) starts Blender with the add-on enabled, and the add-on clicks **Start streaming** by itself once Blender has loaded (`QAR_BLENDER_AUTO_START=1`). If that start fails, for example because the first-run approval was declined, it is not repeated: click **Start streaming** yourself.
+
 You can also add Blender to the visualizer's [Source Applications](https://docs.quaternar.com/docs/operator-guide/source-applications) and start it from there:
 
 1. Switch the visualizer to the **Developer** UI mode (Settings).

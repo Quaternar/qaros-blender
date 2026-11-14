@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
-"""The Blender add-on's stop detection (qaros_anari/hub_launch.py), with plain Python: a Blender
-that QAROS started quits when QAROS closes its stdin; one started by hand never does."""
+"""The Blender add-on's stop detection and automatic Start (qaros_anari/hub_launch.py), with plain
+Python: a Blender that QAROS started quits when QAROS closes its stdin; one started by hand never
+does. One started from the Blender tile starts streaming by itself, once."""
 import importlib.util
 import os
 from pathlib import Path
@@ -50,6 +51,56 @@ class StopRequestWatcherTests(unittest.TestCase):
             self.assertFalse(watcher.wait(0.3), "a line on stdin is not a stop request")
             writer.close()
             self.assertTrue(watcher.wait(WAIT), "closing stdin must be seen as the stop request")
+
+
+class AutoStartRequestedTests(unittest.TestCase):
+    def parse(self, value):
+        warnings = []
+        environ = {} if value is None else {hub_launch.AUTO_START_ENVIRONMENT: value}
+        return hub_launch.auto_start_requested(environ, warnings.append), warnings
+
+    def test_the_tiles_variable_name(self):
+        self.assertEqual(hub_launch.AUTO_START_ENVIRONMENT, "QAR_BLENDER_AUTO_START")
+
+    def test_on_words_in_any_case(self):
+        for value in ("1", "true", "on", "yes", "TRUE", "Yes", " on "):
+            self.assertEqual(self.parse(value), (True, []), value)
+
+    def test_off_words_are_off_without_a_warning(self):
+        for value in ("0", "false", "off", "no", "OFF", "No"):
+            self.assertEqual(self.parse(value), (False, []), value)
+
+    def test_unset_or_empty_is_off_without_a_warning(self):
+        self.assertEqual(self.parse(None), (False, []))
+        self.assertEqual(self.parse(""), (False, []))
+        self.assertEqual(self.parse("  "), (False, []))
+
+    def test_other_text_is_off_with_a_warning(self):
+        for value in ("2", "enabled", "y"):
+            started, warnings = self.parse(value)
+            self.assertFalse(started, value)
+            self.assertEqual(len(warnings), 1, value)
+            self.assertIn(repr(value), warnings[0])
+
+
+class AutoStartOnceTests(unittest.TestCase):
+    def test_a_requested_start_happens_once(self):
+        auto_start = hub_launch.AutoStartOnce(True)
+        self.assertTrue(auto_start.pending)
+        self.assertTrue(auto_start.take(running=False))
+        self.assertFalse(auto_start.pending)
+        # A failed join leaves streaming off: no second attempt, the user presses Start.
+        self.assertFalse(auto_start.take(running=False))
+
+    def test_no_start_when_not_requested(self):
+        auto_start = hub_launch.AutoStartOnce(False)
+        self.assertFalse(auto_start.pending)
+        self.assertFalse(auto_start.take(running=False))
+
+    def test_no_start_when_the_user_already_started(self):
+        auto_start = hub_launch.AutoStartOnce(True)
+        self.assertFalse(auto_start.take(running=True))
+        self.assertFalse(auto_start.take(running=False), "a Stop afterwards does not start it again")
 
 
 if __name__ == "__main__":
