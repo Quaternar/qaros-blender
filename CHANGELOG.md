@@ -8,6 +8,14 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ## [Unreleased]
 
+### Added
+
+- **Streams to** in the QAROS tab chooses the devices the scene streams to: **All devices** (the
+  default, as before) or a checkbox per connected headset and Visualizer receiver, following devices
+  as they join and leave, applied at once and saved with the `.blend`. A Blender started from QAROS
+  without a file streams to every device. Needs a QAROS whose ANARI device takes `qar.targets`; an
+  older one keeps streaming to every device and the tab says so.
+
 ## [0.4.0] - 2026-11-15
 
 ### Added

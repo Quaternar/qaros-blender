@@ -44,6 +44,23 @@ While streaming, the **QAROS** tab shows:
 | **Restart Blender to use …** | the Backend preference names another backend than the one loaded |
 | objects, triangles | what is being streamed |
 | material lines | the loaded backend's material support and any approximation (see [Materials](#materials)) |
+| **Streams to** | the devices that get the stream (see [Choose devices](#choose-devices)) |
+
+### Choose devices
+
+By default the scene streams to every device in QAROS: every headset and every receiver of a Visualizer, also those that join later. **Streams to** in the **QAROS** tab narrows that, like **Streams to** of an app in the Visualizer's Source Applications:
+
+1. Start streaming. Once it runs, the tab lists the connected devices, each with a checkbox; the list follows devices as they join and leave.
+2. Untick a device to stop streaming to it, or untick **All devices** and tick the ones you want. A dot beside a device means it is receiving the stream now.
+3. Tick **All devices** to stream to everyone again.
+
+- A change applies at once; no Stop or Start.
+- Unticking **All devices** keeps every connected device ticked until you untick one.
+- A chosen device that leaves stays in the list as *not connected* and gets the stream again when it comes back.
+- Unticking every device streams to nobody; the app volume stays.
+- The choice is saved with the `.blend` file, like the **App volume** name. A new scene, and a Blender started from QAROS without a file, streams to every device. A file saved on another QAROS lists its devices as *not connected*.
+- **Users** (preferences) is the most devices served at once, 2 by default; the tab warns when more are chosen.
+- An older QAROS cannot choose: the tab says so and streams to every device.
 
 ### Start Blender from QAROS
 
@@ -175,6 +192,7 @@ What each backend shows:
 | Alpha stays opaque | The tab says **Backend lacks alpha blending** (Helide). Use VisGL or OSPRay. |
 | Part of the scene is missing | It lies outside the app volume or beyond **Far**. Move or scale the volume, or change **Scale** or **Far**. |
 | The scene is tiny or huge | The app volume kept the scale it had from earlier. Stream into a new **App volume** name after setting **Scale** (room metres per Blender unit). |
+| A headset or Visualizer receiver shows nothing | **Streams to** in the QAROS tab: tick the device, or **All devices**. With more devices than **Users** (preferences), only that many get the stream. |
 | **'…' is already shown by another Blender** | Another Blender streams into that volume. Choose another **App volume** name, or leave it empty. |
 
 ## Limitations
