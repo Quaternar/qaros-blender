@@ -1,0 +1,125 @@
+# SPDX-License-Identifier: MIT
+#
+# A tag vX.Y.Z (release) or vX.Y.Z-rc.N (release candidate) packages the add-on and publishes a
+# GitHub release with qaros_blender_anari-<version>.zip (the ZIP Blender's Install from Disk takes) and
+# manifest.json, which the QAROS Visualizer's Blender tile downloads the latest release from.
+# Tags are the add-on's own version; X.Y.Z must equal the file VERSION, which must equal
+# bl_info["version"] (tools/package_release.py). See docs/DEVELOPING.md, "Releasing".
+#
+# A pull request into main packages the add-on as a workflow artifact, version X.Y.Z-pr.<number>,
+# and never publishes. workflow_dispatch with a tag rebuilds and republishes that tag's release;
+# without one it packages the branch as a workflow artifact only.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to package and publish (v0.4.0). Empty: package the branch, publish nothing."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Package
+    runs-on: windows-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_type == 'tag' && github.ref || inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Version from the tag and VERSION
+        id: version
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          python tools/package_release.py --check
+          core="$(tr -d '[:space:]' < VERSION)"
+          tag=""
+          if [ "$GITHUB_REF_TYPE" = tag ]; then tag="$GITHUB_REF_NAME"; else tag="$INPUT_TAG"; fi
+          if [ -n "$tag" ]; then
+            if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+              echo "::error::tag '$tag' is not vX.Y.Z or vX.Y.Z-rc.N"
+              exit 1
+            fi
+            version="${tag#v}"
+            publish=true
+          elif [ "$EVENT" = pull_request ]; then
+            version="$core-pr.$PR_NUMBER"
+            publish=false
+          else
+            version="$core"
+            publish=false
+          fi
+          if [ "${version%%-*}" != "$core" ]; then
+            echo "::error::version $version does not match VERSION $core. Fix VERSION or the tag."
+            exit 1
+          fi
+          { echo "version=$version"; echo "tag=$tag"; echo "publish=$publish"; } >> "$GITHUB_OUTPUT"
+          echo "qaros-blender $version (VERSION $core, publish $publish)"
+      - name: Unit tests
+        run: python tools/run_tests.py --group unit
+      - name: Package
+        run: python tools/package_release.py --version "${{ steps.version.outputs.version }}" --out-dir dist/release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qaros_blender_anari-${{ steps.version.outputs.version }}
+          path: |
+            dist/release/*.zip
+            dist/release/manifest.json
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    needs: package
+    if: needs.package.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: qaros_blender_anari-${{ needs.package.outputs.version }}
+          path: release
+      - name: Check the assets against manifest.json
+        run: |
+          cat release/manifest.json
+          jq -r '.assets[] | "\(.sha256)  release/\(.name)"' release/manifest.json | sha256sum -c -
+      - name: Create or update the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.package.outputs.tag }}
+          VERSION: ${{ needs.package.outputs.version }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            flags=()
+            if [[ "$VERSION" == *-* ]]; then flags+=(--prerelease); fi
+            gh release create "$TAG" release/* --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "qaros-blender $VERSION" \
+              --notes "QAROS ANARI Streaming add-on for Blender $VERSION. Install it from the QAROS Visualizer's Blender tile, or in Blender with Edit > Preferences > Add-ons > Install from Disk and qaros_blender_anari-$VERSION.zip. manifest.json lists the ZIP's SHA-256, the QAROS and Blender versions it needs. Changes: https://github.com/$GITHUB_REPOSITORY/blob/$TAG/CHANGELOG.md" \
+              "${flags[@]}"
+          fi

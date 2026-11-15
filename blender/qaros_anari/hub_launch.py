@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
-"""How a Blender that QAROS started learns that QAROS stops it. No bpy here, so it is tested with
-plain Python.
+"""How a Blender that QAROS started learns that QAROS stops it, whether to start streaming by
+itself, and which preferences apply when its preferences do not list the add-on. No bpy here, so it
+is tested with plain Python.
 
 A hub's launcher stops an app by closing its stdin, asking it to close and, one second later,
 terminating it (docs/DEVELOPING.md). Blender treats neither the closed stdin nor the
@@ -10,6 +11,7 @@ import os
 import stat
 import sys
 import threading
+from types import SimpleNamespace
 
 
 def stdin_is_pipe(stream=None):
@@ -69,3 +71,70 @@ class StopRequestWatcher:
         except (OSError, ValueError):
             pass
         self._stopped.set()
+
+
+# Set to 1 by the QAROS Visualizer's Blender tile when it starts Blender: the
+# add-on starts streaming once by itself, without the user pressing Start.
+AUTO_START_ENVIRONMENT = "QAR_BLENDER_AUTO_START"
+# The words QAR_PANEL_AUTO_CONNECT of the ROS 2 Rviz plugin takes, in any case.
+AUTO_START_ON = frozenset(("1", "true", "on", "yes"))
+AUTO_START_OFF = frozenset(("0", "false", "off", "no"))
+
+
+def auto_start_requested(environ, warn):
+    """Whether QAROS asked this Blender to start streaming by itself. Unset or empty is off; any
+    other word is off too, with a warning through ``warn``, so a typo never shares a scene the user
+    did not mean to share."""
+    value = (environ.get(AUTO_START_ENVIRONMENT) or "").strip()
+    if not value:
+        return False
+    word = value.lower()
+    if word in AUTO_START_ON:
+        return True
+    if word not in AUTO_START_OFF:
+        warn(
+            f"{AUTO_START_ENVIRONMENT}={value!r} is none of 1/true/on/yes or 0/false/off/no: "
+            "not starting by itself"
+        )
+    return False
+
+
+class AutoStartOnce:
+    """The automatic Start of one Blender process: at most one attempt, and none once streaming is
+    on already (the user pressed Start first). A failed attempt is not repeated: the user presses
+    Start, as without auto-start."""
+
+    def __init__(self, requested):
+        self._pending = bool(requested)
+
+    @property
+    def pending(self):
+        return self._pending
+
+    def take(self, running):
+        """True exactly once, when an automatic Start is still due and streaming is off."""
+        if not self._pending:
+            return False
+        self._pending = False
+        return not running
+
+
+# Blender's own value for a property declared without a default, by property function.
+PROPERTY_ZERO = {"StringProperty": "", "BoolProperty": False, "IntProperty": 0, "FloatProperty": 0.0}
+
+
+def preference_defaults(annotations):
+    """The add-on's preferences as the user would find them unchanged: each declared property's
+    `default`, else Blender's zero for its type. ``annotations`` maps a name to the deferred
+    property of the AddonPreferences class (``function`` and ``keywords``).
+
+    QAROS starts Blender with ``--addons qaros_anari``, which enables the add-on for the session
+    without adding it to the preferences (``addon_utils.enable`` without ``default_set``). A Blender
+    whose preferences never enabled it, a portable or never-started one among them, then has no
+    preferences entry for the add-on, and these values apply."""
+    values = {}
+    for name, prop in annotations.items():
+        keywords = getattr(prop, "keywords", None) or {}
+        function = getattr(getattr(prop, "function", None), "__name__", "")
+        values[name] = keywords["default"] if "default" in keywords else PROPERTY_ZERO.get(function)
+    return SimpleNamespace(**values)

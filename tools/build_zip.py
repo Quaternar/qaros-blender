@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Write the installable add-on ZIP: qaros_anari/ with every source file, no caches.
 
-    python tools/build_zip.py [--output dist/qaros_anari.zip]"""
+    python tools/build_zip.py [--output dist/qaros_blender_anari.zip]"""
 import argparse
 from pathlib import Path
 import zipfile
@@ -34,7 +34,7 @@ def build(output: Path) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--output", type=Path, default=ROOT / "dist" / "qaros_anari.zip")
+    parser.add_argument("--output", type=Path, default=ROOT / "dist" / "qaros_blender_anari.zip")
     args = parser.parse_args()
     count = build(args.output.resolve())
     print(f"Wrote {args.output} ({count} files)")

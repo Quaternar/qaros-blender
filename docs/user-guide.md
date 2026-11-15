@@ -21,7 +21,9 @@ flowchart LR
 
 ## Set up
 
-1. Download `qaros_anari.zip` from this repository's [Releases](https://github.com/Quaternar/qaros-blender/releases) and install it in Blender: **Edit → Preferences → Add-ons**, then **Install from Disk** and pick the ZIP. Enable **QAROS ANARI Streaming**.
+1. Install the add-on, one of:
+   - **QAROS Visualizer:** the **Blender** tile in Source Applications downloads the latest release of the add-on and starts Blender with it (see [Start Blender from QAROS](#start-blender-from-qaros)).
+   - **Install from Disk:** download `qaros_blender_anari-<version>.zip` from this repository's [latest release](https://github.com/Quaternar/qaros-blender/releases/latest) and install it in Blender: **Edit → Preferences → Add-ons**, then **Install from Disk** and pick the ZIP. Enable **QAROS ANARI Streaming**. To update, install a newer ZIP the same way.
 2. Leave **ANARI folder** in the add-on's preferences empty: the add-on then uses the ANARI device QAROS installed.
 3. Optionally choose a **Backend** (see [Backends](#backends)). **Automatic** is right for most PCs.
 
@@ -44,6 +46,8 @@ While streaming, the **QAROS** tab shows:
 | material lines | the loaded backend's material support and any approximation (see [Materials](#materials)) |
 
 ### Start Blender from QAROS
+
+The visualizer's **Blender** tile in [Source Applications](https://docs.quaternar.com/docs/operator-guide/source-applications) starts Blender with the add-on enabled, and the add-on clicks **Start streaming** by itself once Blender has loaded (`QAR_BLENDER_AUTO_START=1`). If that start fails, for example because the first-run approval was declined, it is not repeated: click **Start streaming** yourself.
 
 You can also add Blender to the visualizer's [Source Applications](https://docs.quaternar.com/docs/operator-guide/source-applications) and start it from there:
 
@@ -123,7 +127,7 @@ Blender's own **File → Import → Universal Scene Description** gets the first
 
 | Setting | Default | Meaning | Applies |
 |---|---|---|---|
-| **ANARI folder** | empty | folder with `anari.dll` and `anari_library_qaros.dll`; empty uses the installed ANARI device | after a Blender restart |
+| **ANARI folder** | empty | folder with `anari.dll` and `anari_library_qaros.dll`; empty uses the ANARI device of the QAROS that started Blender, else the installed one on the system `PATH` | after a Blender restart |
 | **Backend** | Automatic | the renderer, see [Backends](#backends) | after a Blender restart |
 | **Users** | 2 | how many headsets and visualizers can watch at once | next start |
 | **Frame rate** | 30 | stereo pairs per second per user | next start |

@@ -9,7 +9,10 @@
 | `tests/` | unit tests (plain Python), Blender tests (background mode), device tests |
 | `tests/usd/` | USD scenes for the USD tests |
 | `tools/run_tests.py` | runs the tests, see [Tests](#tests) |
-| `tools/build_zip.py` | writes `dist/qaros_anari.zip` |
+| `tools/build_zip.py` | writes `dist/qaros_blender_anari.zip` |
+| `tools/package_release.py` | checks `VERSION` against `bl_info["version"]`; writes the release assets |
+| `VERSION` | the next planned release `X.Y.Z`, equal to `bl_info["version"]` |
+| `.github/workflows/release.yml` | packages every pull request, publishes a release on a `v*` tag |
 | `tools/blender_material_validation.py` | live material reference scene for checking a backend by eye |
 | `tools/prepare_blender_addon.py` | adds `qaros` to the library list of Khronos's `CustomAnariRender.py` render engine |
 
@@ -19,7 +22,7 @@ The add-on ships no native code. It loads, through `ctypes`:
 
 | Library | From | Used for |
 |---|---|---|
-| `anari.dll`, `anari_library_qaros.dll` | QAROS setup, `anari\` (on the system `PATH`), or **ANARI folder** | the scene: device, objects, materials, lights, `qar.*` parameters |
+| `anari.dll`, `anari_library_qaros.dll` | **ANARI folder**, else `QAR_ANARI_FOLDER` (set by the QAROS that started Blender), else the first `PATH` entry holding both (the QAROS setup's `anari\`) | the scene: device, objects, materials, lights, `qar.*` parameters |
 | the QAR runtime (`qar-streaming-c`) | the path the device reports (`qar.runtimeLibrary`) | controls panel, gestures, on the device's own session |
 
 - The C structures in `panel.py` and `pointing.py` follow the public C API header
@@ -77,6 +80,16 @@ sequenceDiagram
   it to close and terminating it one second later. When QAROS started Blender (`QAR_INSTANCE` set,
   stdin a pipe), the add-on watches stdin and quits Blender at once; Blender writes `quit.blend`
   first. A Blender started by hand never quits on its own.
+- **Start from the Blender tile** (`hub_launch.py`): the QAROS Visualizer's Blender tile starts
+  Blender with `--addons qaros_anari` and `QAR_BLENDER_AUTO_START=1`. The add-on then presses
+  **Start streaming** once, 0.5 s after it registered (a persistent timer, so a `.blend` named on the
+  command line is loaded first). `1`, `true`, `on`, `yes` (any case) switch it on; `0`, `false`,
+  `off`, `no` or unset leave it off; any other text is off with a warning in the console. A failed
+  Start is not repeated, and a Start the user pressed first is not doubled.
+- **Preferences under `--addons`**: `--addons` enables the add-on for the session without adding it
+  to Blender's preferences, so a Blender whose preferences never enabled it has no entry for it.
+  `preferences()` then answers the declared defaults (`hub_launch.preference_defaults`), kept for
+  the session, and never writes the add-on into the user's preferences.
 
 ## Developing against a hub from a QAROS build
 
@@ -94,9 +107,9 @@ python tools/run_tests.py --group unit                      # plain Python only
 python tools/run_tests.py --anari-folder <build>\qar-anari-device\bin --backend visgl
 ```
 
-- `unit` runs everywhere. `blender` needs Blender (found on `PATH` or in Program Files, or
-  `--blender`). `device` also needs a device folder: the installed QAROS's `anari` folder by
-  default.
+- `unit` runs everywhere. `blender` needs Blender (`--blender`, else `QAR_TEST_BLENDER_EXECUTABLE`,
+  else `PATH`, else Program Files). `device` also needs a device folder: the installed QAROS's
+  `anari` folder by default.
 - Device tests run with streaming off (`QAR_ANARI_STREAM=0`) on `--backend` (default `helide`). A
   test exits 77 (skipped) when the backend cannot run on this PC, for example VisGL without
   hardware OpenGL.
@@ -106,9 +119,64 @@ python tools/run_tests.py --anari-folder <build>\qar-anari-device\bin --backend 
 
 ## Releasing
 
-1. Update `bl_info["version"]` in `blender/qaros_anari/__init__.py` and move `Unreleased` in
-   `CHANGELOG.md` under that version.
-2. Tag `vX.Y.Z` and push the tag. CI builds `qaros_anari.zip` and attaches it to a GitHub release.
+The add-on is released like the other QAROS apps (qaros-rerun, qaros-ros-rviz): a GitHub release
+per version with the add-on ZIP and a `manifest.json`. The QAROS Visualizer's Blender tile reads
+`releases/latest/download/manifest.json` and downloads the latest add-on from it.
+
+### Versions
+
+- [`VERSION`](../VERSION) holds the next planned version `X.Y.Z`. Blender needs a literal
+  `bl_info["version"]` in `blender/qaros_anari/__init__.py`: keep it equal to `VERSION`. CI
+  (`tools/package_release.py --check`) fails when they differ.
+- Release tags are the add-on's own version, not the QAROS version: `vX.Y.Z`, or `vX.Y.Z-rc.N` for
+  a candidate (published as a GitHub pre-release). A tag whose `X.Y.Z` differs from `VERSION`
+  fails the release. A pull request is packaged as `X.Y.Z-pr.<number>` and never published.
+- Semantic versioning: a minor version adds features, a patch version only fixes. Tags go on
+  `main`; there are no release branches.
+
+### Release assets
+
+| Asset | What it is |
+|---|---|
+| `qaros_blender_anari-<version>.zip` | the folder `qaros_anari/` at the root: the ZIP Blender's **Install from Disk** takes |
+| `manifest.json` | the release, for the Visualizer's Blender tile |
+
+```json
+{
+  "version": 1,
+  "release": "0.4.0",
+  "package": "qaros-blender",
+  "assets": [
+    {
+      "name": "qaros_blender_anari-0.4.0.zip",
+      "sha256": "<64 lower-case hex digits>",
+      "size": 123456,
+      "platform": "any",
+      "app_version": "0.4.0",
+      "min_qaros_version": "0.9.0",
+      "min_blender_version": "4.5.0",
+      "addon_module": "qaros_anari"
+    }
+  ]
+}
+```
+
+- `version` is the manifest format, `release` the add-on version, `package` always `qaros-blender`.
+- `platform` is `any`: the add-on is pure Python and loads QAROS's own ANARI device.
+- `min_qaros_version` is `MIN_QAROS_VERSION` in `tools/package_release.py`, the oldest QAROS the
+  add-on streams with; `min_blender_version` is `bl_info["blender"]`; `addon_module` is the name
+  Blender enables (`--addons qaros_anari`).
+- `python tools/package_release.py --out-dir dist/release` writes both locally.
+
+### Release `X.Y.Z`
+
+1. Optional candidate: tag the commit to test `vX.Y.Z-rc.N` on `main` and push the tag.
+2. Release commit: move the entries of `## [Unreleased]` in `CHANGELOG.md` under
+   `## [X.Y.Z] - YYYY-MM-DD` and leave an empty `## [Unreleased]` above it.
+3. Tag that commit `vX.Y.Z` on `main` and push the tag. `release.yml` runs the unit tests, builds
+   the ZIP and `manifest.json` and attaches them to the GitHub release `vX.Y.Z`.
+4. Bump: in the next commit set `VERSION` and `bl_info["version"]` to the next planned version
+   (`X.(Y+1).0`), never in the tagged commit.
 
 ## Commits
 

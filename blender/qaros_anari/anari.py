@@ -158,24 +158,54 @@ class MaterialSupport:
         return tuple(name for name, data_type in expected if not self.supports(name, data_type))
 
 
+# Set by QAROS in a Blender it starts (the Blender tile of the Visualizer): the folder of that QAROS's
+# ANARI device, so the add-on loads the device of the QAROS that started it.
+FOLDER_ENVIRONMENT = "QAR_ANARI_FOLDER"
+
+
+def find_folder(folder, name, environ=None, is_file=None):
+    """The folder anari.dll and anari_library_<name>.dll load from: the one the user named, else the
+    one QAROS names (QAR_ANARI_FOLDER), else the first PATH entry holding both (the QAROS setup puts
+    its `anari` folder there). Python's ctypes never searches PATH for a bare name, so the PATH
+    lookup is done here. Empty when no folder has them."""
+    if folder:
+        return str(folder)
+    environ = os.environ if environ is None else environ
+    is_file = os.path.isfile if is_file is None else is_file
+    files = ("anari.dll", f"anari_library_{name}.dll")
+    candidates = [environ.get(FOLDER_ENVIRONMENT, "")]
+    candidates.extend(environ.get("PATH", "").split(os.pathsep))
+    for candidate in candidates:
+        candidate = candidate.strip().strip('"')
+        if candidate and all(is_file(os.path.join(candidate, file)) for file in files):
+            return candidate
+    return ""
+
+
 class Library:
     """anari.dll and one loaded ANARI library (`qaros`). `folder` holds anari.dll and
-    anari_library_qaros.dll; empty means the system search path (the QAROS setup puts its
-    `anari` folder there)."""
+    anari_library_qaros.dll; empty means QAR_ANARI_FOLDER, then the system search path
+    (find_folder)."""
 
     def __init__(self, folder, name, on_status):
         self._dll_directory = None
-        if folder:
-            folder = Path(folder)
-            if not (folder / "anari.dll").is_file():
-                raise AnariError(f"No anari.dll in {folder}")
-            self._dll_directory = os.add_dll_directory(str(folder))
-            # ANARI's loader takes the library by its bare name; loading it first by full path
-            # makes that name resolve to this copy, not another one on the search path.
-            ctypes.WinDLL(str(folder / f"anari_library_{name}.dll"))
-            self.api = ctypes.CDLL(str(folder / "anari.dll"))
-        else:
-            self.api = ctypes.CDLL("anari.dll")
+        named = bool(folder)
+        folder = find_folder(folder, name)
+        if not folder:
+            raise AnariError(
+                "No anari.dll found: install QAROS with its ANARI device, or set ANARI folder in the "
+                "add-on's preferences"
+            )
+        folder = Path(folder)
+        if not (folder / "anari.dll").is_file():
+            raise AnariError(f"No anari.dll in {folder}")
+        if not named:
+            print(f"[qaros-anari] ANARI folder: {folder}", flush=True)
+        self._dll_directory = os.add_dll_directory(str(folder))
+        # ANARI's loader takes the library by its bare name; loading it first by full path
+        # makes that name resolve to this copy, not another one on the search path.
+        ctypes.WinDLL(str(folder / f"anari_library_{name}.dll"))
+        self.api = ctypes.CDLL(str(folder / "anari.dll"))
         _bind(self.api)
         # Called from any backend or stream thread; the reference keeps the thunk alive.
         self._callback = STATUS_CALLBACK(
