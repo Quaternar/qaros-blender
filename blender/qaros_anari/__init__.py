@@ -23,6 +23,7 @@ from .hub_launch import (
     stdin_is_pipe,
 )
 from .controls import Controls
+from .gestures import POLICY_AUTO, POLICY_VIEW
 from .protocol import panel_names, toggled_panel
 from .materials import material_descriptions
 from .panel import QarError, Runtime, ServedPanel, VolumeGestures
@@ -120,6 +121,17 @@ class Preferences(bpy.types.AddonPreferences):
         ),
         default=VISRTX_PHYSICAL,
     )
+    hand_gestures: bpy.props.EnumProperty(
+        name="Hand gestures",
+        description="What one-hand drags and two-hand spreads and turns in the app volume do",
+        items=(
+            (POLICY_AUTO, "Selected object, else view",
+             "A drag that grabs your selected object moves it, two hands scale or turn it; with nothing "
+             "selected every gesture moves the view", 0),
+            (POLICY_VIEW, "View only", "Every gesture moves the view, never an object", 1),
+        ),
+        default=POLICY_AUTO,
+    )
     # What the controls panel in the headset shows (docs/DEVELOPING.md).
     show_object_tab: bpy.props.BoolProperty(name="Object", description="Location, rotation and scale tab", default=True)
     show_material_tab: bpy.props.BoolProperty(name="Material", description="Base colour, roughness and metallic tab", default=True)
@@ -145,6 +157,7 @@ class Preferences(bpy.types.AddonPreferences):
         row.prop(self, "far")
         layout.prop(self, "ambient")
         layout.prop(self, "visrtx_materials")
+        layout.prop(self, "hand_gestures")
         self.draw_controls_panel(layout.box())
 
     def draw_controls_panel(self, box):
@@ -182,6 +195,11 @@ def controls_settings():
         "panels": prefs.show_panels_tab,
     }
     return tuple(tab for tab, on in switches.items() if on), panel_names(prefs.controls_panels)
+
+
+def gesture_policy():
+    """The Hand gestures preference: read every tick."""
+    return preferences().hand_gestures
 
 
 class QAROS_OT_toggle_controls_panel(bpy.types.Operator):
@@ -438,13 +456,13 @@ class Streamer:
         try:
             self.runtime = Runtime(library)
             self.panel = ServedPanel(self.runtime, session, volume_id, self.volume.name, self.volume.display_name)
-            self.controls = Controls(self.panel, controls_settings)
+            self.controls = Controls(self.panel, controls_settings, gesture_policy)
             log("controls panel opened beside the app volume")
             try:
                 self.controls.attach_gestures(
                     VolumeGestures(self.runtime, session, volume_id, self.controls.receive_gesture)
                 )
-                log("pointing into the app volume selects and moves objects")
+                log("hand gestures in the app volume: Blender moves the view or the selected object")
             except (QarError, OSError) as error:
                 # The panel works without it: only picking in the volume is missing.
                 log(f"pointing into the app volume not available: {error}")

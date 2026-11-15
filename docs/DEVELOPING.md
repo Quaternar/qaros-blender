@@ -86,13 +86,27 @@ sequenceDiagram
   depsgraph's instances (matched by matrix), so a drag never moves the prototype inside every
   instance.
 - **View, not model:** the app pose and app scale (gestures, the Visualizer's Content mode,
-  `qar.fitBox`) are a camera transform: the device renders each eye in app content space, so the
-  add-on never writes a Blender object for them. Only a one-hand drag that grabbed the user's
-  selection moves it: the user is in the object mode (one-hand drag reported, not mapped) only
-  while their latest hover picks their selection (`Controls.follow_hovers`, one ray cast per new
-  hover, never during their drag), and a drag in that mode moves the object only when its own
-  hit, else the hand's latest hover, picks the selection (`Controls.aimed`). A pinch on a GUI panel
-  or on empty space reaches the volume without a hit and moves nothing.
+  `qar.fitBox`) are a camera transform: the device renders each eye in app content space, so
+  changing them never writes a Blender object.
+- **Blender decides what a gesture does** (`gestures.py`, proof of concept): while streaming, the
+  add-on replaces the volume's default gesture configuration with one where no rule moves the app
+  (`panel.app_decides_from`: mapping none, precision 1, constant sensitivity, plus a two-hand turn
+  about the vertical, which QAROS's default lacks), and puts the volume's own configuration back
+  when it stops. QAROS still recognises the gestures and draws the rays and hands.
+  - Each manipulation is decided once, when it starts, on QAR's callback thread
+    (`Controls.decide`) from the user's selection and aim, which the UI thread publishes
+    (`Controls.follow_hovers`, one ray cast per new hover).
+  - View gestures go to a worker thread (`gestures.ViewWorker`) that writes the app pose and scale
+    through the C API, newest update first. They do not run in the callback, nor on Blender's
+    20 Hz timer, which is too slow for a view that follows the hands.
+  - Object gestures go to the UI thread. A one-hand drag moves the selection only when its own
+    hit, else the hand's latest hover, picks it (`Controls.aimed`). Two hands scale or turn the
+    selection about its origin (`controls.twisted`).
+  - No C API change: the configuration, gesture events and app transform calls already exist.
+    Before, QAROS mapped every gesture to the app transform and the add-on switched a user to an
+    "object mode" only while their ray was on their selection.
+  - The Visualizer's own mouse Content mode still writes the app transform directly (it ignores the
+    volume's rules), outside this path.
 - **Streams to** (`targets.py`): the device reports the session's target applications in
   `qar.sessionTargets` (JSON) and streams to the peer ids in `qar.targets` (unset: every one). The
   tab reads the list at most every 0.5 s (panels redraw on every mouse move), and the 1 s redraw

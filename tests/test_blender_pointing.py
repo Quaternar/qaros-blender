@@ -176,28 +176,73 @@ class ViewNotModelTests(unittest.TestCase):
         self.assertFalse(self.state.dragging("b"))
 
 
-class ObjectModeTests(unittest.TestCase):
-    def test_only_one_hand_drags_stop_moving_the_app(self):
-        default = panel.GestureConfiguration()
-        kinds = [
-            (panel.GESTURE_ONE_HAND_6DOF, panel.MAPPING_APP_POSE),
-            (3, 2),  # two-hand distance -> app scale
-            (4, panel.MAPPING_APP_POSE),  # two-hand rotate -> app pose
-            (panel.GESTURE_CLICK, panel.MAPPING_NONE),
-        ]
-        for index, (kind, mapping) in enumerate(kinds):
-            default.mapping_rules[index].gesture_kind = kind
-            default.mapping_rules[index].app_transform_mapping = mapping
-            default.mapping_rules[index].precision = 2.0
-        default.mapping_rule_count = len(kinds)
-        mode = panel.object_mode_from(default)
-        self.assertEqual(mode.mapping_rule_count, 4)
+def configuration(kinds):
+    """A gesture configuration of (kind, mapping) rules, each with precision 2, sensitivity 2 (based
+    on app scale) and its index as ray colour."""
+    config = panel.GestureConfiguration()
+    for index, (kind, mapping) in enumerate(kinds):
+        rule = config.mapping_rules[index]
+        rule.gesture_kind = kind
+        rule.enabled = True
+        rule.app_transform_mapping = mapping
+        rule.precision = 2.0
+        rule.app_scale_sensitivity_mode = 2
+        rule.controller_ray_style.color[0] = index
+    config.mapping_rule_count = len(kinds)
+    return config
+
+
+def rules(config):
+    return [
+        (config.mapping_rules[i].gesture_kind, config.mapping_rules[i].app_transform_mapping)
+        for i in range(config.mapping_rule_count)
+    ]
+
+
+class AppDecidesTests(unittest.TestCase):
+    # QAROS's default rules (AppVolume.hpp): spread -> scale, drag -> pose, hover, click; no turn.
+    QAROS_DEFAULT = [
+        (panel.GESTURE_TWO_HAND_SCALE, 2),
+        (panel.GESTURE_ONE_HAND_6DOF, panel.MAPPING_APP_POSE),
+        (panel.GESTURE_HOVER, panel.MAPPING_NONE),
+        (panel.GESTURE_CLICK, panel.MAPPING_NONE),
+    ]
+
+    def test_no_gesture_moves_the_app_and_a_turn_follows_the_spread(self):
+        default = configuration(self.QAROS_DEFAULT)
+        config = panel.app_decides_from(default)
         self.assertEqual(
-            [(mode.mapping_rules[i].gesture_kind, mode.mapping_rules[i].app_transform_mapping) for i in range(4)],
-            [(panel.GESTURE_ONE_HAND_6DOF, panel.MAPPING_NONE), (3, 2), (4, panel.MAPPING_APP_POSE), (0, 0)],
+            rules(config),
+            [(panel.GESTURE_TWO_HAND_SCALE, 0), (panel.GESTURE_TWO_HAND_ROTATE, 0), (panel.GESTURE_ONE_HAND_6DOF, 0),
+             (panel.GESTURE_HOVER, 0), (panel.GESTURE_CLICK, 0)],
         )
-        self.assertEqual(mode.mapping_rules[0].precision, 2.0, "everything else is the default mode's")
-        self.assertEqual(default.mapping_rules[0].app_transform_mapping, panel.MAPPING_APP_POSE, "a copy")
+        self.assertEqual(rules(default)[1], (panel.GESTURE_ONE_HAND_6DOF, panel.MAPPING_APP_POSE), "a copy")
+
+    def test_manipulations_report_hand_metres_and_pointing_keeps_its_rule(self):
+        config = panel.app_decides_from(configuration(self.QAROS_DEFAULT))
+        for index in range(3):
+            self.assertEqual(config.mapping_rules[index].precision, 1.0)
+            self.assertEqual(config.mapping_rules[index].app_scale_sensitivity_mode, panel.SENSITIVITY_CONSTANT)
+        self.assertEqual(config.mapping_rules[3].precision, 2.0, "a hover moves nothing anyway")
+
+    def test_the_turn_draws_the_spreads_ray_and_turns_about_the_vertical(self):
+        config = panel.app_decides_from(configuration(self.QAROS_DEFAULT))
+        turn = config.mapping_rules[1]
+        self.assertTrue(turn.enabled)
+        self.assertEqual(turn.controller_ray_style.color[0], 0, "the spread's ray")
+        self.assertEqual(turn.rotation_axes, panel.AXIS_Y)
+        self.assertEqual(turn.translation_axes, panel.AXIS_NONE)
+        self.assertEqual(config.mapping_rules[2].controller_ray_style.color[0], 1, "the drag's own ray")
+
+    def test_a_volume_that_turns_already_keeps_its_turn(self):
+        config = panel.app_decides_from(
+            configuration([(panel.GESTURE_ONE_HAND_6DOF, 1), (panel.GESTURE_TWO_HAND_ROTATE, 1)])
+        )
+        self.assertEqual(rules(config), [(panel.GESTURE_ONE_HAND_6DOF, 0), (panel.GESTURE_TWO_HAND_ROTATE, 0)])
+
+    def test_without_a_spread_the_turn_comes_first(self):
+        config = panel.app_decides_from(configuration([(panel.GESTURE_ONE_HAND_6DOF, 1)]))
+        self.assertEqual(rules(config), [(panel.GESTURE_TWO_HAND_ROTATE, 0), (panel.GESTURE_ONE_HAND_6DOF, 0)])
 
     @unittest.skipUnless(ctypes.sizeof(ctypes.c_void_p) == 8, "64-bit layouts")
     def test_layouts_match_the_c_structures(self):

@@ -2,12 +2,11 @@
 """Pointing into the app volume, without Blender: where a gesture's points are in Blender's world,
 the ray a click casts, and what each user's one-hand drag does to the object they selected.
 
-Moving, turning or scaling the app volume's content (a one-hand drag in the default mode, every
-two-hand gesture, Fit scene to volume) is a view change: the device renders each user's eyes in app
-content space, so it moves the camera over the scene and never touches a Blender object. Only a
-one-hand drag that grabs the user's selected object edits the scene. A user is in the object mode
-only while their ray is on their selection: a drag anywhere else, a GUI panel's title bar included,
-stays a view change.
+Moving, turning or scaling the app volume's content (a view gesture, Fit scene to volume) is a view
+change: the device renders each user's eyes in app content space, so it moves the camera over the
+scene and never touches a Blender object. Which gestures edit the scene instead is gestures.py's
+decision; a one-hand drag edits it only when it grabs the user's selected object, so a drag anywhere
+else, a GUI panel's title bar included, stays a view change.
 
 A gesture's points are in app content space: the ANARI world the add-on builds, which is Blender's
 world with Y up (sync.py: Blender (x, y, z) -> (x, z, -y)), unscaled. A one-hand drag's

@@ -8,6 +8,19 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ## [Unreleased]
 
+### Added
+
+- Two hands scale or turn the selected object about its origin; with nothing selected they zoom
+  or turn the view. A two-hand turn about the vertical now works at all (QAROS's default rules had
+  none).
+- **Hand gestures** preference: **Selected object, else view** (the default) or **View only**.
+
+### Changed
+
+- Blender decides what every hand gesture in the app volume does; QAROS only reports gestures and
+  draws the rays. While streaming the add-on replaces the volume's gesture rules, and restores them
+  when it stops.
+
 ## [0.4.1] - 2026-11-15
 
 ### Added

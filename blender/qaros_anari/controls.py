@@ -5,15 +5,16 @@ Messages arrive on a QAR library thread and only enter the EditQueue there. A ti
 thread drains it: edits apply latest-first per control, a drag that ends records one undo step, and
 the page's state is posted again whenever it changed. Every bpy access happens on that timer."""
 import math
+from dataclasses import dataclass
 import threading
 import time
 
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Quaternion, Vector
 
-from . import blender_panels, pointing
+from . import blender_panels, gestures, pointing
 from .materials import principled_shader
-from .panel import OBJECT_MODE, QarError
+from .panel import QarError
 from .protocol import (
     Call,
     EditQueue,
@@ -201,14 +202,36 @@ def select_only(name):
     layer.objects.active = obj
 
 
+@dataclass
+class Twist:
+    """One user's two-hand scale or turn of their selected object."""
+
+    object_name: str
+    start: Matrix  # the object's world matrix when the gesture began
+    app_orientation: tuple  # the app orientation then: turns arrive in app volume space
+    moved: bool = False
+
+
+def twisted(kind, start, translation, rotation, app_orientation):
+    """The world matrix a two-hand gesture gives an object that started at `start`: scaled or turned
+    about its own origin, the turn about the world's axes."""
+    if kind == gestures.TWO_HAND_SCALE:
+        return start @ Matrix.Scale(gestures.scale_factor(translation), 4)
+    x, y, z, w = gestures.object_rotation(rotation, app_orientation)
+    origin = Matrix.Translation(start.translation)
+    return origin @ Quaternion((w, x, y, z)).to_matrix().to_4x4() @ origin.inverted() @ start
+
+
 class Controls:
     """Connects one ServedPanel to Blender until `close`."""
 
-    def __init__(self, panel, settings=None):
+    def __init__(self, panel, settings=None, gesture_policy=None):
         self.panel = panel
         # () -> (switched-on tabs, chosen panel class names): the add-on's preferences, read each
         # tick so a change shows without reopening the panel.
         self.settings = settings or (lambda: (TABS, blender_panels.DEFAULT_PANELS))
+        # () -> gestures.POLICY_AUTO or POLICY_VIEW: the add-on's preference, read each tick.
+        self.gesture_policy = gesture_policy or (lambda: gestures.POLICY_AUTO)
         self.queue = EditQueue()
         self.last_state = None
         self.last_panels = None
@@ -219,25 +242,77 @@ class Controls:
         self.hovers = {}  # (peer, hand) -> (monotonic time, action point): written on QAR's thread
         self.hovers_lock = threading.Lock()
         self.pointing = pointing.Pointing()
-        self.modes = {}  # peer -> the gesture mode last switched to ('object' or 'default')
-        self.hovers_followed = {}  # peer -> time of the hover its mode was last decided by
+        self.hovers_followed = {}  # peer -> time of the hover their aim was last decided by
+        self.twists = {}  # (peer, gesture id) -> Twist
+        self.routing_lock = threading.Lock()
+        # Written on the UI thread, read on QAR's when a manipulation starts:
+        self.routing = {}  # peer -> (has a selection, ray on it)
+        self.policy = gestures.POLICY_AUTO
+        self.decided = {}  # (peer, gesture id) -> gestures.VIEW or OBJECT
+        self.view = None  # gestures.ViewWorker, once gestures are attached
         panel.subscribe(self.receive)
         bpy.app.timers.register(self.tick, first_interval=TICK)
 
-    def attach_gestures(self, gestures):
-        self.gestures = gestures
+    def attach_gestures(self, volume_gestures):
+        """From now on Blender decides what every manipulation does: the view moves through
+        `volume_gestures.change_app_transform`, objects on the UI thread."""
+
+        def read():
+            position, orientation, scale = volume_gestures.app_pose()
+            return gestures.AppTransform(position, orientation, scale)
+
+        def write(transform):
+            volume_gestures.change_app_transform(transform.position, transform.orientation, transform.scale)
+
+        self.gestures = volume_gestures
+        self.view = gestures.ViewWorker(read, write, log)
 
     def receive_gesture(self, event):
-        """QAR library thread: queue the app volume gesture, nothing else. A hover only updates the
-        hand's latest hit (hovers come every frame and change nothing in Blender)."""
-        if event["kind"] == pointing.HOVER and pointing.has_hit(event):
+        """QAR library thread: route the app volume gesture, nothing else. A hover only updates the
+        hand's latest hit (hovers come every frame and change nothing in Blender). A manipulation
+        is decided once, when it starts: view gestures go to the view worker, object ones to the
+        UI thread."""
+        kind = event["kind"]
+        if kind == pointing.HOVER and pointing.has_hit(event):
             with self.hovers_lock:
                 kept = self.hovers.setdefault((event["peer"], event.get("hand")), [])
                 kept.append((time.monotonic(), (event["start"], event["action"])))
                 del kept[: -pointing.HOVERS_KEPT]
             return
-        if event["kind"] in (pointing.CLICK, pointing.ONE_HAND):
+        if kind == pointing.CLICK:
             self.queue.put(("gesture", event))
+            return
+        if kind not in gestures.MANIPULATIONS:
+            return
+        decided = self.decide(event)
+        if decided == gestures.VIEW and self.view is not None:
+            self.view.put(event)
+        elif decided == gestures.OBJECT:
+            self.queue.put(("gesture", event))
+
+    def decide(self, event):
+        """The target of the manipulation `event` belongs to, fixed when it started; None for one
+        whose start this add-on did not see."""
+        key = (event["peer"], event["gesture_id"])
+        with self.routing_lock:
+            if event["phase"] == pointing.STARTED:
+                selected, on_selection = self.routing.get(event["peer"], (False, False))
+                self.decided[key] = gestures.target(event["kind"], self.policy, selected, on_selection)
+                return self.decided[key]
+            if event["phase"] in (pointing.ENDED, pointing.CANCELED):
+                return self.decided.pop(key, None)
+            return self.decided.get(key)
+
+    def set_routing(self, peer):
+        """Publishes `peer`'s selection and aim to QAR's thread."""
+        selected = peer in self.pointing.selected
+        with self.routing_lock:
+            on_selection = self.routing.get(peer, (False, False))[1] if selected else False
+            self.routing[peer] = (selected, on_selection)
+
+    def set_aim(self, peer, on_selection):
+        with self.routing_lock:
+            self.routing[peer] = (peer in self.pointing.selected, on_selection)
 
     def receive(self, text, user):
         """QAR library thread: parse and queue, nothing else."""
@@ -272,6 +347,9 @@ class Controls:
             final = final or edit.final
         if final:
             push_undo()
+        policy = self.gesture_policy()
+        with self.routing_lock:
+            self.policy = policy
         self.follow_hovers()
         for item in others:
             if isinstance(item, tuple) and item[0] == "gesture":
@@ -288,14 +366,16 @@ class Controls:
             self.post_panels(tabs, chosen, force=repost)
 
     def gesture(self, event):
-        """One app volume gesture on the UI thread. True when it ended a drag that moved an object."""
+        """One app volume gesture on the UI thread: a click, or a manipulation decided for the
+        user's selected object (view ones never come here). True when it ended a manipulation that
+        changed an object."""
         kind, phase, peer = event["kind"], event["phase"], event["peer"]
         if kind == pointing.CLICK and phase in (pointing.INSTANT, pointing.ENDED):
             self.click(peer, event)
             return False
-        # A drag in the default mode moves the view (the app transform): the mixer already did it,
-        # and Blender's scene stays as it is.
-        if kind != pointing.ONE_HAND or event["mode"] != OBJECT_MODE:
+        if kind in (gestures.TWO_HAND_SCALE, gestures.TWO_HAND_ROTATE):
+            return self.twist(event)
+        if kind != pointing.ONE_HAND:
             return False
         key = event["gesture_id"]
         if phase == pointing.STARTED:
@@ -319,6 +399,43 @@ class Controls:
                 self.move(name, restore)
                 return False
             return moved
+        return False
+
+    def twist(self, event):
+        """A two-hand scale or turn of the user's selected object. True when it ended having changed
+        the object; a canceled one puts the object back."""
+        key, phase = (event["peer"], event["gesture_id"]), event["phase"]
+        if phase == pointing.STARTED:
+            obj = bpy.data.objects.get(self.pointing.selected.get(event["peer"], ""))
+            if obj is None:
+                return False
+            orientation = (0.0, 0.0, 0.0, 1.0)
+            if self.gestures is not None:
+                try:
+                    orientation, _scale = self.gestures.app_transform()
+                except QarError as error:
+                    log(f"app transform not read: {error}")
+            self.twists[key] = Twist(obj.name, obj.matrix_world.copy(), orientation)
+            return False
+        twist = self.twists.get(key)
+        if twist is None:
+            return False
+        obj = bpy.data.objects.get(twist.object_name)
+        if obj is None:
+            self.twists.pop(key, None)
+            return False
+        if phase == pointing.UPDATED:
+            obj.matrix_world = twisted(
+                event["kind"], twist.start, event["translation"], event.get("rotation", (0.0, 0.0, 0.0, 1.0)), twist.app_orientation
+            )
+            twist.moved = True
+            return False
+        if phase in (pointing.ENDED, pointing.CANCELED):
+            del self.twists[key]
+            if phase == pointing.CANCELED:
+                obj.matrix_world = twist.start
+                return False
+            return twist.moved
         return False
 
     def content_delta(self, translation):
@@ -345,9 +462,9 @@ class Controls:
         return pick(*ray) if ray is not None else None
 
     def follow_hovers(self):
-        """Each user with a selection is in the object mode only while their latest hover is on it:
-        a one-hand drag then moves the object, anywhere else it moves the view. A user moving an
-        object keeps the mode until the drag ends (a running gesture keeps its mode anyway)."""
+        """Whether each user with a selection points at it, by their latest hover: a one-hand drag
+        starting then grabs the object, anywhere else it moves the view. A drag in progress keeps
+        what it was decided as."""
         latest = {}
         for (peer, _hand), kept in self.hovers_snapshot():
             if kept and (peer not in latest or kept[-1][0] > latest[peer][0]):
@@ -360,7 +477,7 @@ class Controls:
             self.hovers_followed[peer] = seen
             ray = pointing.click_ray({"start": start, "action": action})
             aimed = pick(*ray) if ray is not None else None
-            self.set_mode(peer, self.pointing.wanted_mode(peer, aimed))
+            self.set_aim(peer, self.pointing.wanted_mode(peer, aimed) == "object")
 
     def click(self, peer, event):
         hover = self.recent_hover(peer, event.get("hand"), event.get("start"))
@@ -375,8 +492,8 @@ class Controls:
         mode = self.pointing.clicked(peer, name)
         if name is not None:
             select_only(name)
-        self.set_mode(peer, mode)
-        # The click decided the mode: only a hover after it moves the ray off the selection.
+        self.set_aim(peer, mode == "object")
+        # The click decided the aim: only a hover after it moves the ray off the selection.
         latest = [kept[-1][0] for (who, _hand), kept in self.hovers_snapshot() if who == peer and kept]
         if latest:
             self.hovers_followed[peer] = max(latest)
@@ -389,22 +506,9 @@ class Controls:
         obj = bpy.data.objects.get(name)
         if obj is None:
             for gone in self.pointing.forget_object(name):
-                self.set_mode(gone, "default")
+                self.set_routing(gone)
             return
         obj.matrix_world.translation = Vector(translation)
-
-    def set_mode(self, peer, mode):
-        if self.gestures is None or self.modes.get(peer) == mode:
-            return
-        try:
-            if mode == "object":
-                self.gestures.select_object_mode(peer)
-            else:
-                self.gestures.select_default_mode(peer)
-        except QarError as error:
-            log(f"gesture mode for {peer[:8]} not changed: {error}")
-            return
-        self.modes[peer] = mode
 
     def apply_prop(self, edit):
         field = self.exposed.get(edit.id)
@@ -446,6 +550,9 @@ class Controls:
 
     def close(self):
         self.closed = True
+        if self.view is not None:
+            self.view.close()
+            self.view = None
         if self.gestures is not None:
             for error in self.gestures.close():
                 log(f"closing the volume gestures: {error}")

@@ -114,9 +114,15 @@ While streaming, every user sees a **Blender** panel beside the app volume. It e
 |---|---|
 | Click an object | selects it and makes it active. A child moves in world space and keeps its parent; a collection instance selects and moves the object that instances it |
 | One-hand drag that grabs your selected object | moves that object in Blender |
-| One-hand drag anywhere else (empty space, another object, a panel's title bar) | moves the view (the scene in its volume) while your ray is off your selection; Blender's objects stay put |
+| One-hand drag anywhere else (empty space, another object, a panel's title bar) | pans the view (the scene in its volume); Blender's objects stay put |
+| Two hands apart or together, with an object selected | scales that object about its origin |
+| Two hands turning, with an object selected | turns that object about its origin, around the vertical |
+| Two hands apart or together, or turning, with nothing selected | zooms or turns the view about the volume's centre |
 | Click empty space | clears your selection |
-| Two-hand scale or rotate | the view, always |
+
+- Blender decides what each gesture does, when it starts. **Hand gestures** in the add-on's
+  preferences: **Selected object, else view** (the table above), or **View only** (every gesture
+  moves the view).
 
 - Your ray decides: while it rests on your selected object, a pinch grabs the object; once a hover
   shows it elsewhere in the volume, a pinch moves the view. A pinch that grabs nothing in the
