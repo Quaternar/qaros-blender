@@ -8,6 +8,8 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-15
+
 ### Added
 
 - **Streams to** in the QAROS tab chooses the devices the scene streams to: **All devices** (the
