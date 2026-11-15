@@ -8,6 +8,11 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ## [Unreleased]
 
+### Changed
+
+- Gaussian splats, point cloud objects and meshes without faces are not streamed. The tab and the
+  console now say so once per object, and **Fit scene to volume** frames only what is streamed.
+
 ### Fixed
 
 - Moving, turning or scaling the app volume's content only changes the view, never Blender's

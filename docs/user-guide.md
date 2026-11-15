@@ -192,6 +192,7 @@ What each backend shows:
 - **Whole objects:** an object partly outside the app volume is streamed whole; one large mesh around the viewer is never left out.
 - **Large edits cost time in Blender:** a changed object is sent again in full, so editing a very large mesh is slower while streaming.
 - **Moving many objects at once is slower:** objects in motion are drawn one by one until they rest for about 2 s.
-- **Geometry:** meshes, and curves, point clouds and volumes as far as they convert to a mesh.
+- **Geometry:** meshes, and curves and volumes as far as they convert to a mesh.
+- **Gaussian splats and point clouds are not streamed.** This covers point cloud and Gaussian splat objects (Blender 5.3 and later) and meshes with vertices but no faces, such as a 3DGS PLY imported as loose vertices in Blender 5.2 or earlier. The tab lists each as **'name': Gaussian splats and point clouds are not streamed** (**'name': has no faces: not streamed** for other meshes without faces), and the same line is written once per object to Blender's console as `[qaros-anari] ...`. **Fit scene to volume** leaves them out, so it frames only what is streamed.
 - **One app volume per Blender,** placed at the scene's world origin; no camera, collection or origin object is used to place it.
 - Windows only.

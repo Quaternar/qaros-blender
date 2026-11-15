@@ -590,6 +590,11 @@ class QAROS_PT_panel(bpy.types.Panel):
                 row = layout.row()
                 row.alert = True
                 row.label(text=STREAMER.capture.diagnostics.summary, icon="ERROR")
+            if STREAMER.capture is not None:
+                for reason in STREAMER.capture.unstreamed.values():
+                    row = layout.row()
+                    row.alert = True
+                    row.label(text=reason, icon="ERROR")
             if support.fallback_reason:
                 row = layout.row()
                 row.alert = True

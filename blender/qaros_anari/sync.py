@@ -309,6 +309,26 @@ class Snapshot:
         return self
 
 
+POINT_TYPES = {"POINTCLOUD", "GAUSSIAN_SPLAT"}
+SPLAT_ATTRIBUTES = ("f_dc_0", "opacity", "scale_0", "rot_0")
+
+
+def unstreamed_reason(evaluated):
+    """Why the stream leaves `evaluated` out although it is visible, or None when it is drawn: a
+    point cloud or Gaussian splat object, or a mesh with vertices but no faces (a 3DGS PLY imported
+    as loose vertices). Text for the status list and the log."""
+    name = evaluated.original.name
+    if evaluated.type in POINT_TYPES:
+        return f"'{name}': Gaussian splats and point clouds are not streamed"
+    if evaluated.type == "MESH":
+        mesh = evaluated.data
+        if len(mesh.vertices) and not len(mesh.polygons):
+            if all(attribute in mesh.attributes for attribute in SPLAT_ATTRIBUTES):
+                return f"'{name}': Gaussian splats and point clouds are not streamed"
+            return f"'{name}': has no faces: not streamed"
+    return None
+
+
 def scene_bounds(depsgraph):
     """(lower, upper) of every visible object the stream draws, in the app volume's space (Y up)
     the device renders, or None without one: what "Fit scene to volume" sends as qar.fitBox. Each
@@ -319,6 +339,8 @@ def scene_bounds(depsgraph):
         if evaluated.type not in GEOMETRY_TYPES:
             continue
         if not instance.is_instance and not evaluated.original.visible_get():
+            continue
+        if unstreamed_reason(evaluated) is not None:
             continue
         local = np.array([tuple(corner) + (1.0,) for corner in evaluated.bound_box], dtype=np.float32)
         world = Z_UP_TO_Y_UP @ np.array(instance.matrix_world, dtype=np.float32)
@@ -337,6 +359,9 @@ class SceneCapture:
         self.meshes = {}
         self.materials = {}
         self.diagnostics = MaterialDiagnostics(on_warning)
+        self.on_warning = on_warning
+        self.unstreamed = {}  # object name -> reason, for the objects now in the scene
+        self.reported_unstreamed = set()
         self.material_support = material_support
 
     def capture(self, depsgraph, dirty_objects, full, materials=None):
@@ -349,10 +374,19 @@ class SceneCapture:
             self.materials.clear()
         extracted = set()
         seen = set()
+        unstreamed = {}
         for instance in depsgraph.object_instances:
             evaluated = instance.object
             original = evaluated.original
             if not instance.is_instance and not original.visible_get():
+                continue
+            reason = unstreamed_reason(evaluated)
+            if reason is not None:
+                unstreamed[original.name] = reason
+                if original.name not in self.reported_unstreamed:
+                    self.reported_unstreamed.add(original.name)
+                    if self.on_warning is not None:
+                        self.on_warning(reason)
                 continue
             if evaluated.type in GEOMETRY_TYPES:
                 name = original.name
@@ -368,6 +402,7 @@ class SceneCapture:
                 light = light_parameters(evaluated.data, instance.matrix_world)
                 if light is not None:
                     snapshot.lights.append(light)
+        self.unstreamed = unstreamed
         self.meshes = {name: parts for name, parts in self.meshes.items() if name in seen}
         descriptions = snapshot.materials
         snapshot.materials = {
