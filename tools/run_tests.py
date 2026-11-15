@@ -34,7 +34,7 @@ UNIT = ["test_blender_helper.py", "test_blender_hub_launch.py", "test_blender_an
         "test_blender_panel.py", "test_blender_controls_protocol.py", "test_blender_pointing.py",
         "test_release_package.py"]
 BLENDER = ["test_blender_panel_replay.py", "test_blender_pointing_scene.py", "test_blender_usd_import.py",
-           "test_blender_addon_launch.py"]
+           "test_blender_addon_launch.py", "test_blender_splats.py"]
 # Plain Python driving Blender processes of its own (--blender).
 BLENDER_DRIVER = ["test_blender_addon_install.py"]
 DEVICE_PYTHON = ["test_blender_addon_binding.py"]
