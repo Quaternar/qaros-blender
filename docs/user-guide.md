@@ -142,8 +142,9 @@ Blender's own **File → Import → Universal Scene Description** gets the first
 | **VisGL** | GPU (OpenGL 4.3) | lit, with shadows; colour, metallic, roughness, emission, transparency | 30 fps for scenes of thousands of objects | headsets: the default choice |
 | **OSPRay** (Intel) | CPU | flat shading with hard shadows; colour and transparency only | about 20 fps for a scene that fills the view | PCs without a usable GPU |
 | **Helide** | CPU | simple reference shading; no transparency | a few fps | checking a result against a second renderer |
+| **VisRTX** (NVIDIA, where installed) | NVIDIA RTX GPU | ray traced, with shadows; metallic, roughness and emission with grain in a moving view, or smooth matte (**VisRTX materials**) | 30 fps for the cube scene | comparing with a ray tracer |
 
-- **Automatic** (default) uses the first of VisGL, OSPRay and Helide that starts on this PC.
+- **Automatic** (default) uses the first of VisGL, VisRTX, OSPRay and Helide that starts on this PC: VisGL first, for its physically based materials without grain. A QAROS whose ANARI device does not know this order yet starts with VisRTX instead; choose **VisGL** to be sure.
 - The CPU backends render at half the headset's resolution per side by default and are upscaled; see **Render scale** below.
 - A stream that keeps every CPU core busy runs on OSPRay or Helide, not on VisGL: check the **Backend:** line.
 - **Backend** and **ANARI folder** take effect only when Blender restarts. The tab says when the loaded backend differs from the preference.
@@ -162,6 +163,7 @@ Blender's own **File → Import → Universal Scene Description** gets the first
 | **Scale** | 0.25 | room metres per Blender unit | when the app volume is created ([App volume](#app-volume)) |
 | **Near**, **Far** | 0.1, 100 | depth range in Blender units; content outside it is not drawn | next start |
 | **Ambient light** | 0.3 | constant light on faces that no lamp reaches | next start |
+| **VisRTX materials** | Physically based (metal, grain) | on VisRTX: **Physically based** shows metal, highlights and emission, with grain on faces lit by the ambient light in a moving view; **Matte (smooth)** streams colour only, without grain | next start |
 | **Controls panel in the headset** | every tab; Transform, Relations, Visibility | which tabs the [controls panel](#controls-panel-in-the-headset) shows, and the Blender panels on its **Panels** tab (**Default panels** restores them) | at once |
 
 ## Materials
@@ -178,14 +180,15 @@ The add-on streams each material's **Principled BSDF** that feeds **Surface** on
 
 What each backend shows:
 
-| | VisGL | OSPRay | Helide |
-|---|---|---|---|
-| Base Color | yes | yes | yes |
-| Metallic, Roughness, Emission | yes | no (matte) | yes |
-| Alpha | yes | yes | no (opaque) |
+| | VisGL | OSPRay | Helide | VisRTX |
+|---|---|---|---|---|
+| Base Color | yes | yes | yes | yes |
+| Metallic, Roughness, Emission | yes | no (matte) | yes | yes, or no with **VisRTX materials** Matte |
+| Alpha | yes | yes | no (opaque) | yes |
 
 - **Material with nodes off,** or a shader other than a Principled BSDF (mix shaders, groups): the viewport display colour and alpha, with a note in the tab.
-- **Lights:** a sun stays a sun; point, spot and area lamps become point lights. A scene without lamps gets one sun. World lighting and HDRIs are not streamed; **Ambient light** lights the faces lamps miss.
+- **Lights:** a sun stays a sun; point, spot and area lamps become point lights. A scene without lamps gets one sun. **Ambient light** lights the faces lamps miss.
+- **World:** an **Environment Texture** (equirectangular image, for example an HDRI) on the World's **Background**, with its **Strength** and the rotation of a **Mapping** node, or the Background's plain colour, becomes an environment light that lights and reflects in the scene without being drawn behind it. Only a backend that can light with an environment it does not draw gets it; today none of the shipped ones can (VisGL has no environment light, OSPRay's streaming renderer ignores it, VisRTX draws it behind the scene), so metal reflects only the lamps and the ambient light. The World is then left out without a message; the console says `world: not streamed`.
 - **Not streamed:** image and procedural textures, vertex colours, normal and bump maps, transmission and glass, coat, sheen, subsurface and the other advanced Principled inputs.
 - Shading follows the backend, so the picture does not match Blender's viewport, EEVEE or Cycles exactly.
 
@@ -196,7 +199,9 @@ What each backend shows:
 | Nothing happens after **Start streaming** | Answer the **Allow Blender to join QAROS?** prompt (tray window, or the visualizer's **Source Applications** panel). An unanswered prompt expires after 120 s. |
 | Start fails, no backend loads | Check that QAROS was installed with the **ANARI device** component and leave **ANARI folder** empty. Restart Blender after changing it. |
 | The stream is slow and all CPU cores are busy | The scene runs on OSPRay or Helide. Choose **VisGL** under **Backend** and restart Blender. |
-| Metallic, roughness or emission have no effect | The tab says **Backend uses a matte approximation** (OSPRay). Use VisGL. |
+| Metallic, roughness or emission have no effect | The tab says **Backend uses a matte approximation** (OSPRay, or VisRTX with **VisRTX materials** Matte). Use VisGL, or set **VisRTX materials** to Physically based. |
+| Metal looks matte compared with Blender's viewport | Blender's **Material Preview** lights metal with a studio HDRI; the stream has no environment to reflect. Add lamps where the reflections should come from. |
+| Grain on VisRTX | Physically based materials on VisRTX sample the ambient light at random. Set **VisRTX materials** to Matte, or use VisGL. |
 | Editing a Principled node changes nothing | Make sure it feeds **Surface** of the active **Material Output** (target **All**); unconnected nodes are ignored. Set the value directly on the node instead of linking it. |
 | A colour turns into the viewport colour | The input is linked to a node or texture. Set a constant value. |
 | Alpha stays opaque | The tab says **Backend lacks alpha blending** (Helide). Use VisGL or OSPRay. |

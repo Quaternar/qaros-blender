@@ -15,11 +15,22 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
   as they join and leave, applied at once and saved with the `.blend`. A Blender started from QAROS
   without a file streams to every device. Needs a QAROS whose ANARI device takes `qar.targets`; an
   older one keeps streaming to every device and the tab says so.
+- **VisRTX materials** preference: **Physically based (metal, grain)**, the default, or **Matte
+  (smooth)**. Before, VisRTX always streamed matte materials.
+- The scene's World (an equirectangular Environment Texture with its strength and Mapping
+  rotation, or a plain colour) becomes an environment light on a backend that can light with an
+  environment it does not draw. None of today's backends can: VisGL has no environment light,
+  OSPRay's streaming renderer ignores it and VisRTX draws it behind the scene, so the World is
+  left out there without an error (console: `world: not streamed`).
 
 ### Changed
 
 - Gaussian splats, point cloud objects and meshes without faces are not streamed. The tab and the
   console now say so once per object, and **Fit scene to volume** frames only what is streamed.
+- **Automatic** backend tries VisGL first, then VisRTX, OSPRay and Helide. Needs a QAROS whose
+  ANARI device reads `QAR_ANARI_BACKEND_ORDER`; an older one keeps starting with VisRTX.
+- VisRTX streams physically based materials (metal, highlights, emission) by default, with grain
+  on faces lit by the ambient light in a moving view.
 
 ### Fixed
 
