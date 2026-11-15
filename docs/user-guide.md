@@ -68,6 +68,8 @@ The scene streams into one app volume. Its name is the **App volume** field in t
 
 Change the name while stopped: **Stop streaming**, edit, **Start streaming**. Move, rotate and scale the volume like any other app volume.
 
+**Moving the content is a view change.** Moving, turning or scaling the scene in its volume (gestures in a headset, the Visualizer's mouse, **Fit scene to volume**) moves every user's camera over the scene: Blender's objects, and so its file and undo history, stay as they are. Only edits made on purpose change the scene: the panel's sliders, and a drag that grabs the object you selected (below).
+
 - **Placement:** the world origin of the scene sits at the centre of the app volume. Blender's Z-up becomes the room's up. **Fit scene to volume** (QAROS tab) places and scales the scene to fill the volume instead; it is not repeated when the scene changes.
 - **Size:** **Scale** (preferences) is room metres per Blender unit, 0.25 by default: a 4 m Blender scene fills a 1 m volume. It applies when the volume is first created. A volume that already exists keeps its own scale and position, including changes made in the room, across Blender restarts; to start over with the preference, stream into a new **App volume** name.
 - **Outside the volume:** objects whose bounds lie entirely outside the app volume are not streamed. They come back as soon as the volume moves or grows to include them.
@@ -93,9 +95,17 @@ While streaming, every user sees a **Blender** panel beside the app volume. It e
 
 | Gesture | Effect |
 |---|---|
-| Click an object | selects it and makes it active; your one-hand drag now moves that object. A child moves in world space and keeps its parent; a collection instance selects and moves the object that instances it |
-| Click empty space | clears your selection; your one-hand drag moves the scene again |
-| Two-hand scale or rotate | the scene, always |
+| Click an object | selects it and makes it active. A child moves in world space and keeps its parent; a collection instance selects and moves the object that instances it |
+| One-hand drag that grabs your selected object | moves that object in Blender |
+| One-hand drag anywhere else (empty space, another object, a panel's title bar) | moves the view (the scene in its volume) while your ray is off your selection; Blender's objects stay put |
+| Click empty space | clears your selection |
+| Two-hand scale or rotate | the view, always |
+
+- Your ray decides: while it rests on your selected object, a pinch grabs the object; once a hover
+  shows it elsewhere in the volume, a pinch moves the view. A pinch that grabs nothing in the
+  volume (on a panel's title bar, say) never moves an object.
+- Moving a panel never moves the scene in Blender: panels stay where you put them, beside the
+  volume when they first open.
 
 ## USD files
 

@@ -375,8 +375,9 @@ class ServedPanel:
         return errors
 
 
-# The gesture mode a user is switched to while an object is selected: the volume's default mode
-# with a one-hand drag reported instead of moving the app, so the add-on moves the object.
+# The gesture mode a user is switched to while their ray is on the object they selected: the
+# volume's default mode with a one-hand drag reported instead of moving the app, so the add-on moves
+# the object. Everywhere else the user stays in the default mode, where every gesture moves the view.
 OBJECT_MODE = 1
 
 
