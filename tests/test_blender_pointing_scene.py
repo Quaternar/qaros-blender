@@ -1,17 +1,20 @@
 # SPDX-License-Identifier: MIT
 """Pointing into the app volume against a real Blender scene (background mode, factory scene, no
-device): the click ray picks, selection follows, and a drag moves the picked object.
+device): the click ray picks, the tool decides what clicks, double taps and hand gestures do, the
+selection and the controls panel follow, and a drag moves the picked object.
 
     blender -b --factory-startup --python-exit-code 1 --python test_blender_pointing_scene.py"""
+import json
 import math
 from pathlib import Path
 import sys
+import time
 import unittest
 
 import bpy
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "blender"))
-from qaros_anari import controls, gestures, pointing  # noqa: E402
+from qaros_anari import controls, gestures, pointing, protocol  # noqa: E402
 
 
 def content(blender):
@@ -47,7 +50,7 @@ class SceneTests(unittest.TestCase):
     def test_a_drag_moves_the_picked_cube_in_blender_axes(self):
         state = pointing.Pointing()
         picked = controls.pick(*self.click((0.0, -5.0, 0.0), (0.0, 0.0, 0.0)))
-        state.clicked("peer", picked)
+        state.selection = picked
         state.drag_started("peer", 1, tuple(self.cube.matrix_world.translation), picked)
         name, target = state.drag_moved("peer", 1, content((1.0, 0.0, 0.5)))
         fake = controls.Controls.__new__(controls.Controls)  # only move(): no panel, no timer
@@ -84,12 +87,13 @@ class FakeQueue:
         self.items.append(item)
 
 
-def fake_controls():
+def fake_controls(tool=gestures.TOOL_SELECT):
     """A Controls without a panel or a timer: gestures, hovers, routing and pointing only."""
     import threading
 
     fake = controls.Controls.__new__(controls.Controls)
     fake.pointing = pointing.Pointing()
+    fake.taps = pointing.Taps()
     fake.gestures = FakeGestures()
     fake.view = FakeView()
     fake.queue = FakeQueue()
@@ -99,9 +103,16 @@ def fake_controls():
     fake.twists = {}
     fake.routing_lock = threading.Lock()
     fake.routing = {}
-    fake.policy = gestures.POLICY_AUTO
+    fake.selected = False
+    fake.tool = tool
     fake.decided = {}
     return fake
+
+
+def select(fake, name):
+    """`name` selected in Blender, as the UI tick sees it."""
+    controls.select_only(name)
+    fake.follow_selection()
 
 
 class ViewNotModelTests(unittest.TestCase):
@@ -115,7 +126,7 @@ class ViewNotModelTests(unittest.TestCase):
         self.cube.location = (0.0, 0.0, 0.0)
         bpy.context.view_layer.update()
         self.controls = fake_controls()
-        self.controls.pointing.clicked("peer", "Cube")
+        select(self.controls, "Cube")
         self.controls.set_aim("peer", True)
 
     def hover(self, target, when):
@@ -142,23 +153,19 @@ class ViewNotModelTests(unittest.TestCase):
         self.assertAlmostEqual(self.cube.location.y, -1.0, places=5)  # content +Z is Blender -Y
 
     def test_the_aim_follows_the_ray_on_and_off_the_selection(self):
-        import time
-
         now = time.monotonic()
         self.hover((0.0, 0.0, 3.0), now)  # past the cube
         self.controls.follow_hovers()
-        self.assertEqual(self.controls.routing["peer"], (True, False))
+        self.assertFalse(self.controls.routing["peer"])
         self.hover((0.0, 0.0, 0.0), now + 0.1)  # on the cube
         self.controls.follow_hovers()
-        self.assertEqual(self.controls.routing["peer"], (True, True))
+        self.assertTrue(self.controls.routing["peer"])
 
     def test_a_user_moving_the_object_keeps_the_aim(self):
-        import time
-
         self.controls.pointing.drag_started("peer", 1, (0.0, 0.0, 0.0), "Cube")
         self.hover((0.0, 0.0, 3.0), time.monotonic())
         self.controls.follow_hovers()
-        self.assertEqual(self.controls.routing["peer"], (True, True))
+        self.assertTrue(self.controls.routing["peer"])
 
 
 def manipulation(kind, phase, gesture_id=4, translation=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0, 1.0), peer="peer"):
@@ -167,45 +174,191 @@ def manipulation(kind, phase, gesture_id=4, translation=(0.0, 0.0, 0.0), rotatio
 
 
 class RoutingTests(unittest.TestCase):
-    """QAR's thread decides each manipulation once, when it starts: view gestures to the view worker,
-    object ones to the UI thread."""
+    """QAR's thread decides each manipulation once, when it starts, by the tool: view gestures to the
+    view worker, object ones to the UI thread, and with Object selection never the view."""
 
     def setUp(self):
-        self.controls = fake_controls()
+        bpy.data.objects["Cube"].select_set(False)
+        self.controls = fake_controls(gestures.TOOL_NAVIGATE)
 
     def run_gesture(self, kind):
         for phase in (pointing.STARTED, pointing.UPDATED, pointing.ENDED):
             self.controls.receive_gesture(manipulation(kind, phase))
 
-    def test_with_nothing_selected_every_manipulation_moves_the_view(self):
+    def test_navigation_moves_the_view_with_or_without_a_selection(self):
         for kind in gestures.MANIPULATIONS:
             self.run_gesture(kind)
-        self.assertEqual(len(self.controls.view.events), 9)
+        select(self.controls, "Cube")
+        self.controls.set_aim("peer", True)
+        for kind in gestures.MANIPULATIONS:
+            self.run_gesture(kind)
+        self.assertEqual(len(self.controls.view.events), 18)
         self.assertEqual(self.controls.queue.items, [])
 
-    def test_two_hands_on_a_selection_go_to_blender(self):
-        self.controls.pointing.clicked("peer", "Cube")
+    def test_object_selection_moves_only_the_selection(self):
+        self.controls.tool = gestures.TOOL_SELECT
+        select(self.controls, "Cube")
         self.controls.set_aim("peer", False)
         self.run_gesture(gestures.TWO_HAND_ROTATE)
-        self.run_gesture(pointing.ONE_HAND)  # not aimed at the cube: the view
-        self.assertEqual([item[1]["kind"] for item in self.controls.queue.items], [gestures.TWO_HAND_ROTATE] * 3)
-        self.assertEqual([e["kind"] for e in self.controls.view.events], [pointing.ONE_HAND] * 3)
+        self.run_gesture(gestures.TWO_HAND_SCALE)
+        self.run_gesture(pointing.ONE_HAND)  # not aimed at the cube: nothing
+        self.controls.set_aim("peer", True)
+        self.run_gesture(pointing.ONE_HAND)
+        self.assertEqual(
+            [item[1]["kind"] for item in self.controls.queue.items],
+            [gestures.TWO_HAND_ROTATE] * 3 + [gestures.TWO_HAND_SCALE] * 3 + [pointing.ONE_HAND] * 3,
+        )
+        self.assertEqual(self.controls.view.events, [])
 
-    def test_a_gesture_keeps_its_target_when_the_aim_changes(self):
+    def test_object_selection_with_nothing_selected_does_nothing(self):
+        self.controls.tool = gestures.TOOL_SELECT
+        self.controls.follow_selection()
+        for kind in gestures.MANIPULATIONS:
+            self.run_gesture(kind)
+        self.assertEqual(self.controls.view.events, [])
+        self.assertEqual(self.controls.queue.items, [])
+        self.assertEqual(self.controls.decided, {})
+
+    def test_a_gesture_keeps_its_target_when_the_tool_changes(self):
         self.controls.receive_gesture(manipulation(pointing.ONE_HAND, pointing.STARTED))
-        self.controls.pointing.clicked("peer", "Cube")
+        self.controls.tool = gestures.TOOL_SELECT
+        select(self.controls, "Cube")
         self.controls.set_aim("peer", True)
         self.controls.receive_gesture(manipulation(pointing.ONE_HAND, pointing.UPDATED))
         self.controls.receive_gesture(manipulation(pointing.ONE_HAND, pointing.ENDED))
         self.assertEqual(len(self.controls.view.events), 3)
         self.assertEqual(self.controls.decided, {})
 
-    def test_view_only_ignores_the_selection(self):
-        self.controls.pointing.clicked("peer", "Cube")
-        self.controls.set_aim("peer", True)
-        self.controls.policy = gestures.POLICY_VIEW
-        self.run_gesture(gestures.TWO_HAND_SCALE)
-        self.assertEqual(self.controls.queue.items, [])
+
+def click(peer="peer", hand=1, when=None, target=(0.0, 0.0, 0.0), start=(0.0, -5.0, 0.0)):
+    """A click whose ray runs from `start` to `target` (Blender world), as QAR's thread queues it."""
+    return {"peer": peer, "kind": pointing.CLICK, "phase": pointing.INSTANT, "gesture_id": 1, "mode": 0,
+            "hand": hand, "start": content(start), "action": content(target), "translation": (0.0, 0.0, 0.0),
+            "rotation": (0.0, 0.0, 0.0, 1.0), "time": time.monotonic() if when is None else when}
+
+
+class ClickTests(unittest.TestCase):
+    """A click selects by Blender's ray cast with Object selection; a double tap with any tool."""
+
+    def setUp(self):
+        layer = bpy.context.view_layer
+        for obj in layer.objects:
+            obj.select_set(False)
+        layer.objects.active = None
+        self.controls = fake_controls(gestures.TOOL_NAVIGATE)
+
+    def selection(self):
+        layer = bpy.context.view_layer
+        active = layer.objects.active
+        return active.name if active else None, [o.name for o in layer.objects if o.select_get()]
+
+    def test_navigation_does_not_select_on_a_click(self):
+        self.controls.gesture(click(when=10.0))
+        self.assertEqual(self.selection(), (None, []))
+
+    def test_a_double_tap_selects_what_the_ray_hits_in_navigation(self):
+        self.controls.gesture(click(when=10.0))
+        self.controls.gesture(click(when=10.3))
+        self.assertEqual(self.selection(), ("Cube", ["Cube"]))
+        self.assertEqual(self.controls.pointing.selection, "Cube")
+        self.assertTrue(self.controls.selected)
+        self.assertTrue(self.controls.routing["peer"], "the ray that selected it is on it")
+
+    def test_two_slow_clicks_or_two_hands_are_no_double_tap(self):
+        self.controls.gesture(click(when=10.0))
+        self.controls.gesture(click(when=10.0 + pointing.DOUBLE_TAP_SECONDS + 0.1))
+        self.controls.gesture(click(hand=0, when=20.0))
+        self.controls.gesture(click(hand=1, when=20.1))
+        self.assertEqual(self.selection(), (None, []))
+
+    def test_object_selection_selects_on_a_click(self):
+        self.controls.tool = gestures.TOOL_SELECT
+        bpy.data.objects["Camera"].select_set(True)
+        self.controls.gesture(click(when=10.0))
+        self.assertEqual(self.selection(), ("Cube", ["Cube"]))
+
+    def test_a_click_on_nothing_keeps_the_selection(self):
+        self.controls.tool = gestures.TOOL_SELECT
+        self.controls.gesture(click(when=10.0))
+        self.controls.gesture(click(when=20.0, target=(0.0, 0.0, 3.0), start=(0.0, -5.0, 3.0)))
+        self.assertEqual(self.selection(), ("Cube", ["Cube"]))
+
+
+class FakePanel:
+    """The served panel: records what the add-on posts."""
+
+    def __init__(self):
+        self.posted = []
+
+    def subscribe(self, handler):
+        self.handler = handler
+
+    def post(self, text):
+        self.posted.append(json.loads(text))
+
+    def latest(self, key):
+        return next(m["value"] for m in reversed(self.posted) if m.get("t") == "state" and m.get("key") == key)
+
+
+class PanelFollowsSelectionTests(unittest.TestCase):
+    """The controls panel shows the selected object, selected in the headset or in Blender, and its
+    Tools tab and Blender's preference show one tool."""
+
+    def setUp(self):
+        layer = bpy.context.view_layer
+        for obj in layer.objects:
+            obj.select_set(False)
+        layer.objects.active = bpy.data.objects["Light"]
+        bpy.data.objects["Light"].select_set(True)
+        self.tool = gestures.TOOL_NAVIGATE
+        self.panel = FakePanel()
+
+        def set_tool(tool):
+            self.tool = tool
+
+        self.controls = controls.Controls(self.panel, tool=lambda: self.tool, set_tool=set_tool)
+        self.controls.step()
+
+    def tearDown(self):
+        self.controls.close()
+
+    def test_a_double_tap_in_the_headset_shows_its_object(self):
+        self.assertEqual(self.panel.latest("scene")["object"]["name"], "Light")
+        self.controls.queue.put(("gesture", click(when=10.0)))
+        self.controls.queue.put(("gesture", click(when=10.2)))
+        self.controls.step()
+        self.assertEqual(self.panel.latest("scene")["object"]["name"], "Cube")
+        fields = [item.get("id") for panel in self.panel.latest("panels") for item in panel["items"]]
+        self.assertIn("objects:Cube:location", fields)
+        self.assertNotIn("objects:Light:location", fields)
+
+    def test_a_selection_in_blender_shows_its_object_and_moves_with_object_selection(self):
+        controls.select_only("Cube")
+        self.controls.step()
+        self.assertEqual(self.panel.latest("scene")["object"]["name"], "Cube")
+        self.assertEqual(self.controls.pointing.selection, "Cube")
+        self.assertTrue(self.controls.selected)
+
+    def test_the_tools_tab_chooses_the_tool_for_blender_too(self):
+        self.assertEqual(self.panel.latest("scene")["tool"], gestures.TOOL_NAVIGATE)
+        self.assertEqual([tool[0] for tool in self.panel.latest("scene")["tools"]], list(gestures.TOOL_IDS))
+        self.controls.receive(json.dumps({"t": "tool", "value": gestures.TOOL_SELECT}), "user")
+        self.controls.step()
+        self.assertEqual(self.tool, gestures.TOOL_SELECT, "the preference")
+        self.assertEqual(self.controls.tool, gestures.TOOL_SELECT, "the gestures")
+        self.assertEqual(self.panel.latest("scene")["tool"], gestures.TOOL_SELECT, "the page")
+
+    def test_a_tool_chosen_in_blender_shows_on_the_page(self):
+        self.tool = gestures.TOOL_SELECT
+        self.controls.step()
+        self.assertEqual(self.panel.latest("scene")["tool"], gestures.TOOL_SELECT)
+        self.assertEqual(self.panel.latest("scene")["tabs"][0], "tools")
+
+    def test_a_hidden_tools_tab_refuses_a_tool(self):
+        self.controls.settings = lambda: (tuple(tab for tab in protocol.TABS if tab != "tools"), ())
+        self.controls.receive(json.dumps({"t": "tool", "value": gestures.TOOL_SELECT}), "user")
+        self.controls.step()
+        self.assertEqual(self.tool, gestures.TOOL_NAVIGATE)
 
 
 class TwistTests(unittest.TestCase):
@@ -218,7 +371,7 @@ class TwistTests(unittest.TestCase):
         self.cube.scale = (1.0, 1.0, 1.0)
         bpy.context.view_layer.update()
         self.controls = fake_controls()
-        self.controls.pointing.clicked("peer", "Cube")
+        select(self.controls, "Cube")
 
     def tearDown(self):
         self.cube.location = (0.0, 0.0, 0.0)
@@ -262,7 +415,7 @@ def unit_cube_mesh(name):
 def drag(obj, delta_blender):
     """One drag of `obj` by a Blender-axes delta, the way Controls runs it."""
     state = pointing.Pointing()
-    state.clicked("peer", obj.name)
+    state.selection = obj.name
     state.drag_started("peer", 1, tuple(obj.matrix_world.translation), obj.name)
     name, target = state.drag_moved("peer", 1, content(delta_blender))
     fake = controls.Controls.__new__(controls.Controls)  # only move(): no panel, no timer

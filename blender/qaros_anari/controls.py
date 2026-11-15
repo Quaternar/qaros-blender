@@ -22,6 +22,7 @@ from .protocol import (
     PropSet,
     TABS,
     Refused,
+    ToolSet,
     coerce_prop,
     panels_message,
     parse,
@@ -190,7 +191,9 @@ def _same_matrix(a, b):
 
 
 def select_only(name):
-    """Makes `name` the one selected and active object: the panel then shows it."""
+    """Makes `name` the one selected and active object, as a click in the viewport does: the
+    controls panel then shows it, the gestures of Object selection move it, and Blender's own UI
+    shows it selected at once."""
     layer = bpy.context.view_layer
     obj = layer.objects.get(name)
     if obj is None:
@@ -200,6 +203,27 @@ def select_only(name):
             other.select_set(False)
     obj.select_set(True)
     layer.objects.active = obj
+    redraw_desktop()
+
+
+# The editors that show the selection: redrawn after a selection made in the headset, which no
+# mouse event in them would otherwise redraw.
+SELECTION_EDITORS = {"VIEW_3D", "OUTLINER", "PROPERTIES"}
+
+
+def redraw_desktop():
+    for window in bpy.context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type in SELECTION_EDITORS:
+                area.tag_redraw()
+
+
+def selected_name():
+    """The selected object: Blender's active object while it is selected, else None. The one
+    selection every user's gestures and the controls panel follow, made in the headset or in
+    Blender's UI."""
+    obj = bpy.context.view_layer.objects.active
+    return obj.name if obj is not None and obj.select_get() else None
 
 
 @dataclass
@@ -225,13 +249,15 @@ def twisted(kind, start, translation, rotation, app_orientation):
 class Controls:
     """Connects one ServedPanel to Blender until `close`."""
 
-    def __init__(self, panel, settings=None, gesture_policy=None):
+    def __init__(self, panel, settings=None, tool=None, set_tool=None):
         self.panel = panel
         # () -> (switched-on tabs, chosen panel class names): the add-on's preferences, read each
         # tick so a change shows without reopening the panel.
         self.settings = settings or (lambda: (TABS, blender_panels.DEFAULT_PANELS))
-        # () -> gestures.POLICY_AUTO or POLICY_VIEW: the add-on's preference, read each tick.
-        self.gesture_policy = gesture_policy or (lambda: gestures.POLICY_AUTO)
+        # () -> a gestures.TOOL_IDS id, and (id) -> None: the add-on's Tool preference, read each
+        # tick and written by the Tools tab, so the page and Blender's UI show one tool.
+        self.read_tool = tool or (lambda: gestures.TOOL_NAVIGATE)
+        self.write_tool = set_tool or (lambda _tool: None)
         self.queue = EditQueue()
         self.last_state = None
         self.last_panels = None
@@ -242,13 +268,15 @@ class Controls:
         self.hovers = {}  # (peer, hand) -> (monotonic time, action point): written on QAR's thread
         self.hovers_lock = threading.Lock()
         self.pointing = pointing.Pointing()
+        self.taps = pointing.Taps()
         self.hovers_followed = {}  # peer -> time of the hover their aim was last decided by
         self.twists = {}  # (peer, gesture id) -> Twist
         self.routing_lock = threading.Lock()
         # Written on the UI thread, read on QAR's when a manipulation starts:
-        self.routing = {}  # peer -> (has a selection, ray on it)
-        self.policy = gestures.POLICY_AUTO
-        self.decided = {}  # (peer, gesture id) -> gestures.VIEW or OBJECT
+        self.routing = {}  # peer -> their ray is on the selection
+        self.selected = False  # Blender has a selected object
+        self.tool = gestures.TOOL_NAVIGATE
+        self.decided = {}  # (peer, gesture id) -> gestures.VIEW, OBJECT or NOTHING
         self.view = None  # gestures.ViewWorker, once gestures are attached
         panel.subscribe(self.receive)
         bpy.app.timers.register(self.tick, first_interval=TICK)
@@ -271,7 +299,7 @@ class Controls:
         """QAR library thread: route the app volume gesture, nothing else. A hover only updates the
         hand's latest hit (hovers come every frame and change nothing in Blender). A manipulation
         is decided once, when it starts: view gestures go to the view worker, object ones to the
-        UI thread."""
+        UI thread. A click is stamped with its arrival, which double taps are counted by."""
         kind = event["kind"]
         if kind == pointing.HOVER and pointing.has_hit(event):
             with self.hovers_lock:
@@ -280,7 +308,7 @@ class Controls:
                 del kept[: -pointing.HOVERS_KEPT]
             return
         if kind == pointing.CLICK:
-            self.queue.put(("gesture", event))
+            self.queue.put(("gesture", {**event, "time": time.monotonic()}))
             return
         if kind not in gestures.MANIPULATIONS:
             return
@@ -292,27 +320,42 @@ class Controls:
 
     def decide(self, event):
         """The target of the manipulation `event` belongs to, fixed when it started; None for one
-        whose start this add-on did not see."""
+        whose start this add-on did not see. One that moves nothing is logged when it starts."""
         key = (event["peer"], event["gesture_id"])
         with self.routing_lock:
             if event["phase"] == pointing.STARTED:
-                selected, on_selection = self.routing.get(event["peer"], (False, False))
-                self.decided[key] = gestures.target(event["kind"], self.policy, selected, on_selection)
-                return self.decided[key]
-            if event["phase"] in (pointing.ENDED, pointing.CANCELED):
+                on_selection = self.routing.get(event["peer"], False)
+                decided = gestures.target(event["kind"], self.tool, self.selected, on_selection)
+                self.decided[key] = decided
+            elif event["phase"] in (pointing.ENDED, pointing.CANCELED):
                 return self.decided.pop(key, None)
-            return self.decided.get(key)
+            else:
+                return self.decided.get(key)
+        if decided == gestures.NOTHING:
+            why = "the ray is not on the selected object" if self.selected else "nothing is selected"
+            log(f"gesture by {event['peer'][:8]} moves nothing: Object selection, and {why}")
+        return decided
 
-    def set_routing(self, peer):
-        """Publishes `peer`'s selection and aim to QAR's thread."""
-        selected = peer in self.pointing.selected
+    def publish_selection(self):
+        """Publishes whether Blender has a selection to QAR's thread. A changed selection drops
+        every user's aim: it was on the object selected before."""
         with self.routing_lock:
-            on_selection = self.routing.get(peer, (False, False))[1] if selected else False
-            self.routing[peer] = (selected, on_selection)
+            self.selected = self.pointing.selection is not None
+            self.routing.clear()
+        self.hovers_followed.clear()
+
+    def follow_selection(self):
+        """Takes Blender's selection, made in the headset or in Blender's UI, as the gestures'."""
+        name = selected_name()
+        if name == self.pointing.selection:
+            return False
+        self.pointing.selection = name
+        self.publish_selection()
+        return True
 
     def set_aim(self, peer, on_selection):
         with self.routing_lock:
-            self.routing[peer] = (peer in self.pointing.selected, on_selection)
+            self.routing[peer] = bool(on_selection) and self.pointing.selection is not None
 
     def receive(self, text, user):
         """QAR library thread: parse and queue, nothing else."""
@@ -347,9 +390,16 @@ class Controls:
             final = final or edit.final
         if final:
             push_undo()
-        policy = self.gesture_policy()
+        for item in others:
+            if isinstance(item, ToolSet):
+                self.write_tool(item.tool)
+                log(f"tool chosen in the headset: {item.tool}")
+                repost = True
+        tool = self.read_tool()
         with self.routing_lock:
-            self.policy = policy
+            self.tool = tool
+        if self.follow_selection():
+            repost = True  # the panel shows the newly selected object at once
         self.follow_hovers()
         for item in others:
             if isinstance(item, tuple) and item[0] == "gesture":
@@ -362,16 +412,17 @@ class Controls:
                 self.call(item)
         self.post_state(tabs, force=repost)
         self.ticks += 1
-        if sets or others or refused or self.ticks % PANELS_EVERY == 0:
+        if sets or others or repost or self.ticks % PANELS_EVERY == 0:
             self.post_panels(tabs, chosen, force=repost)
 
     def gesture(self, event):
         """One app volume gesture on the UI thread: a click, or a manipulation decided for the
-        user's selected object (view ones never come here). True when it ended a manipulation that
-        changed an object."""
+        selected object (view ones never come here). True when it ended a manipulation that changed
+        an object."""
         kind, phase, peer = event["kind"], event["phase"], event["peer"]
         if kind == pointing.CLICK and phase in (pointing.INSTANT, pointing.ENDED):
-            self.click(peer, event)
+            double_tap = self.taps.tap(peer, event.get("hand"), event.get("time", time.monotonic()))
+            self.click(peer, event, double_tap)
             return False
         if kind in (gestures.TWO_HAND_SCALE, gestures.TWO_HAND_ROTATE):
             return self.twist(event)
@@ -379,7 +430,7 @@ class Controls:
             return False
         key = event["gesture_id"]
         if phase == pointing.STARTED:
-            obj = bpy.data.objects.get(self.pointing.selected.get(peer, ""))
+            obj = bpy.data.objects.get(self.pointing.selection or "")
             if obj is not None:
                 grabbed = self.aimed(peer, event)
                 if self.pointing.drag_started(peer, key, tuple(obj.matrix_world.translation), grabbed) is None:
@@ -402,11 +453,11 @@ class Controls:
         return False
 
     def twist(self, event):
-        """A two-hand scale or turn of the user's selected object. True when it ended having changed
-        the object; a canceled one puts the object back."""
+        """A two-hand scale or turn of the selected object. True when it ended having changed the
+        object; a canceled one puts the object back."""
         key, phase = (event["peer"], event["gesture_id"]), event["phase"]
         if phase == pointing.STARTED:
-            obj = bpy.data.objects.get(self.pointing.selected.get(event["peer"], ""))
+            obj = bpy.data.objects.get(self.pointing.selection or "")
             if obj is None:
                 return False
             orientation = (0.0, 0.0, 0.0, 1.0)
@@ -462,24 +513,35 @@ class Controls:
         return pick(*ray) if ray is not None else None
 
     def follow_hovers(self):
-        """Whether each user with a selection points at it, by their latest hover: a one-hand drag
-        starting then grabs the object, anywhere else it moves the view. A drag in progress keeps
-        what it was decided as."""
+        """Whether each user points at the selection, by their latest hover: a one-hand drag
+        starting then grabs the object (Object selection). A drag in progress keeps what it was
+        decided as."""
+        if self.pointing.selection is None:
+            return
         latest = {}
         for (peer, _hand), kept in self.hovers_snapshot():
             if kept and (peer not in latest or kept[-1][0] > latest[peer][0]):
                 latest[peer] = kept[-1]
         for peer, (seen, (start, action)) in latest.items():
-            if peer not in self.pointing.selected or self.pointing.dragging(peer):
-                continue
-            if self.hovers_followed.get(peer) == seen:
+            if self.pointing.dragging(peer) or self.hovers_followed.get(peer) == seen:
                 continue
             self.hovers_followed[peer] = seen
             ray = pointing.click_ray({"start": start, "action": action})
             aimed = pick(*ray) if ray is not None else None
-            self.set_aim(peer, self.pointing.wanted_mode(peer, aimed) == "object")
+            self.set_aim(peer, self.pointing.aims_at_selection(aimed))
 
-    def click(self, peer, event):
+    def current_tool(self):
+        with self.routing_lock:
+            return self.tool
+
+    def click(self, peer, event, double_tap=False):
+        """A click, or the second click of a double tap: selects what its ray hits when the tool
+        says so (gestures.click_selects). A click on nothing keeps the selection: a pinch on a GUI
+        panel reaches the volume too and must not take the panel's object away."""
+        tap = "double tap" if double_tap else "click"
+        if not gestures.click_selects(self.current_tool(), double_tap):
+            log(f"{tap} by {peer[:8]}: Navigation selects on a double tap")
+            return
         hover = self.recent_hover(peer, event.get("hand"), event.get("start"))
         ray = pointing.click_ray(event, hover)
         name = pick(*ray) if ray is not None else None
@@ -488,11 +550,14 @@ class Controls:
             kept = self.hovers.get((peer, event.get("hand")))
         age = f"{time.monotonic() - kept[-1][0]:.2f} s" if kept else "none"
         aim = "" if ray is None else " from ({:.2f}, {:.2f}, {:.2f}) along ({:.2f}, {:.2f}, {:.2f})".format(*ray[0], *ray[1])
-        log(f"click by {peer[:8]} aimed by {source} (last hover {age}){aim}: {name or 'nothing'}")
-        mode = self.pointing.clicked(peer, name)
-        if name is not None:
-            select_only(name)
-        self.set_aim(peer, mode == "object")
+        log(f"{tap} by {peer[:8]} aimed by {source} (last hover {age}){aim}: {name or 'nothing'}")
+        if name is None:
+            return
+        select_only(name)
+        if name != self.pointing.selection:
+            self.pointing.selection = name
+            self.publish_selection()
+        self.set_aim(peer, True)
         # The click decided the aim: only a hover after it moves the ray off the selection.
         latest = [kept[-1][0] for (who, _hand), kept in self.hovers_snapshot() if who == peer and kept]
         if latest:
@@ -505,8 +570,8 @@ class Controls:
     def move(self, name, translation):
         obj = bpy.data.objects.get(name)
         if obj is None:
-            for gone in self.pointing.forget_object(name):
-                self.set_routing(gone)
+            if self.pointing.forget_object(name):
+                self.publish_selection()
             return
         obj.matrix_world.translation = Vector(translation)
 
@@ -542,6 +607,8 @@ class Controls:
     def post_state(self, tabs, force=False):
         state = snapshot()
         state["tabs"] = [tab for tab in TABS if tab in tabs]
+        state["tool"] = self.read_tool()
+        state["tools"] = [[tool, name, description] for tool, name, description in gestures.TOOLS]
         text = state_message(state)
         if text == self.last_state and not force:
             return

@@ -242,6 +242,35 @@ select {
   align-items: center;
 }
 
+/* The Tools tab: one large button per tool, its description under its name. */
+.tools {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tools button {
+  min-height: 44px;
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.tools .tool-name {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tools .tool-description {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tools button.active .tool-description {
+  color: var(--fg);
+}
+
 [hidden] {
   display: none !important;
 }

@@ -38,6 +38,12 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(protocol.parse(message(t="hello"), USER), protocol.Hello(USER))
         self.assertEqual(protocol.parse(message(t="call", id=3, name="undo"), USER), protocol.Call(3, "undo", USER))
 
+    def test_a_tool_names_one_of_the_tools(self):
+        self.assertEqual(protocol.parse(message(t="tool", value="SELECT"), USER), protocol.ToolSet("SELECT", USER))
+        for value in ("select", "AUTO", None, 1):
+            with self.subTest(value=value), self.assertRaises(protocol.Refused):
+                protocol.parse(message(t="tool", value=value), USER)
+
     def test_anything_else_is_refused(self):
         refused = [
             "not json",
@@ -200,6 +206,11 @@ class SettingsTests(unittest.TestCase):
         self.assertTrue(protocol.shown(protocol.PropSet("objects:Cube:name", -1, "A", True, USER), tabs))
         self.assertFalse(protocol.shown(protocol.PropSet("objects:Cube:name", -1, "A", True, USER), ("object",)))
         self.assertTrue(protocol.shown(protocol.Hello(USER), ()))
+        self.assertTrue(protocol.shown(protocol.ToolSet("SELECT", USER), ("tools",)))
+        self.assertFalse(protocol.shown(protocol.ToolSet("SELECT", USER), tabs), "the Tools tab is off")
+
+    def test_the_tools_tab_comes_first(self):
+        self.assertEqual(protocol.TABS[0], "tools")
 
     def test_the_panel_list_keeps_its_order_and_toggles_at_the_end(self):
         self.assertEqual(protocol.panel_names(" A, B,,A ,C"), ("A", "B", "C"))

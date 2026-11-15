@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""Pointing into the app volume (qaros_anari/pointing.py) and the object gesture mode
-(qaros_anari/panel.py), with plain Python."""
+"""Pointing into the app volume (qaros_anari/pointing.py): rays, the selection, drags and double taps,
+and the gesture configuration the add-on gives the volume (qaros_anari/panel.py), with plain Python."""
 import ctypes
 import importlib.util
 import math
@@ -91,21 +91,16 @@ class HoverFallbackTests(unittest.TestCase):
 class PointingTests(unittest.TestCase):
     def setUp(self):
         self.state = pointing.Pointing()
+        self.state.selection = "Cube"
 
-    def test_a_click_on_an_object_selects_it_and_needs_the_object_mode(self):
-        self.assertEqual(self.state.clicked("a", "Cube"), "object")
-        self.assertEqual(self.state.selected, {"a": "Cube"})
-        self.assertEqual(self.state.clicked("a", None), "default")
-        self.assertEqual(self.state.selected, {})
-
-    def test_users_select_on_their_own(self):
-        self.state.clicked("a", "Cube")
-        self.state.clicked("b", "Light")
-        self.state.clicked("a", None)
-        self.assertEqual(self.state.selected, {"b": "Light"})
+    def test_one_selection_for_every_user(self):
+        self.assertTrue(self.state.aims_at_selection("Cube"))
+        self.assertFalse(self.state.aims_at_selection("Stand"))
+        self.assertFalse(self.state.aims_at_selection(None))
+        self.state.selection = None
+        self.assertFalse(self.state.aims_at_selection(None), "no selection: nothing to aim at")
 
     def test_a_drag_moves_the_object_by_its_content_delta_in_blender_axes(self):
-        self.state.clicked("a", "Cube")
         self.assertEqual(self.state.drag_started("a", 7, (1.0, 2.0, 3.0), "Cube"), "Cube")
         # The grabbed point moved 0.5 up (content +Y) and 0.25 towards the viewer (content +Z).
         name, target = self.state.drag_moved("a", 7, (0.0, 0.5, 0.25))
@@ -114,43 +109,40 @@ class PointingTests(unittest.TestCase):
         self.assertEqual(self.state.drag_finished("a", 7, canceled=False), ("Cube", None, True))
 
     def test_a_canceled_drag_puts_the_object_back(self):
-        self.state.clicked("a", "Cube")
         self.state.drag_started("a", 1, (1.0, 2.0, 3.0), "Cube")
         self.state.drag_moved("a", 1, (1.0, 0.0, 0.0))
         self.assertEqual(self.state.drag_finished("a", 1, canceled=True), ("Cube", (1.0, 2.0, 3.0), True))
 
     def test_a_drag_without_a_selection_or_delta_does_nothing(self):
+        self.state.selection = None
         self.assertIsNone(self.state.drag_started("a", 1, (0.0, 0.0, 0.0), "Cube"))
-        self.state.clicked("a", "Cube")
+        self.state.selection = "Cube"
         self.state.drag_started("a", 1, (0.0, 0.0, 0.0), "Cube")
         self.assertIsNone(self.state.drag_moved("a", 1, None))
         self.assertIsNone(self.state.drag_moved("a", 2, (0.0, 0.0, 0.0)))
         self.assertIsNone(self.state.drag_finished("a", 2, canceled=False))
 
     def test_drags_are_kept_per_user_and_gesture(self):
-        self.state.clicked("a", "Cube")
-        self.state.clicked("b", "Cube")
         self.state.drag_started("a", 1, (0.0, 0.0, 0.0), "Cube")
         self.state.drag_started("b", 1, (0.0, 0.0, 0.0), "Cube")
         _, target = self.state.drag_moved("b", 1, (1.0, 0.0, 0.0))
         self.assertTrue(close(target, (1.0, 0.0, 0.0)))
         self.assertIn(("a", 1), self.state.drags)
 
-    def test_a_gone_object_is_nobodys_selection(self):
-        self.state.clicked("a", "Cube")
-        self.state.clicked("b", "Light")
+    def test_a_gone_object_is_no_selection(self):
         self.state.drag_started("a", 1, (0.0, 0.0, 0.0), "Cube")
-        self.assertEqual(self.state.forget_object("Cube"), ["a"])
-        self.assertEqual(self.state.selected, {"b": "Light"})
+        self.assertFalse(self.state.forget_object("Light"))
+        self.assertTrue(self.state.forget_object("Cube"))
+        self.assertIsNone(self.state.selection)
         self.assertEqual(self.state.drags, {})
 
 
 class ViewNotModelTests(unittest.TestCase):
-    """Moving the volume's content is a view change; only grabbing the selection edits Blender."""
+    """Only grabbing the selection edits Blender."""
 
     def setUp(self):
         self.state = pointing.Pointing()
-        self.state.clicked("a", "Cube")
+        self.state.selection = "Cube"
 
     def test_a_drag_that_grabbed_nothing_moves_no_object(self):
         # A pinch on a GUI panel's title bar or on empty space reaches the volume with no hit.
@@ -163,17 +155,42 @@ class ViewNotModelTests(unittest.TestCase):
         self.assertIsNone(self.state.drag_started("a", 1, (0.0, 0.0, 0.0), "Stand"))
         self.assertEqual(self.state.drags, {})
 
-    def test_the_object_mode_holds_only_while_the_ray_is_on_the_selection(self):
-        self.assertEqual(self.state.wanted_mode("a", "Cube"), "object")
-        self.assertEqual(self.state.wanted_mode("a", "Stand"), "default")
-        self.assertEqual(self.state.wanted_mode("a", None), "default")
-        self.assertEqual(self.state.wanted_mode("b", "Cube"), "default", "b selected nothing")
-
     def test_a_running_drag_is_its_users_only(self):
-        self.state.clicked("b", "Cube")
         self.state.drag_started("a", 3, (0.0, 0.0, 0.0), "Cube")
         self.assertTrue(self.state.dragging("a"))
         self.assertFalse(self.state.dragging("b"))
+
+
+class TapTests(unittest.TestCase):
+    """QAROS reports no double tap in an app volume: two clicks of one hand close together are one."""
+
+    def setUp(self):
+        self.taps = pointing.Taps()
+
+    def test_two_clicks_within_the_window_are_a_double_tap(self):
+        self.assertFalse(self.taps.tap("a", 1, 10.0))
+        self.assertTrue(self.taps.tap("a", 1, 10.0 + pointing.DOUBLE_TAP_SECONDS - 0.01))
+
+    def test_two_clicks_further_apart_are_two_clicks(self):
+        self.assertFalse(self.taps.tap("a", 1, 10.0))
+        self.assertFalse(self.taps.tap("a", 1, 10.0 + pointing.DOUBLE_TAP_SECONDS + 0.01))
+        self.assertTrue(self.taps.tap("a", 1, 10.0 + pointing.DOUBLE_TAP_SECONDS + 0.2), "the second one starts a pair")
+
+    def test_a_third_click_starts_the_next_pair(self):
+        self.taps.tap("a", 1, 10.0)
+        self.assertTrue(self.taps.tap("a", 1, 10.2))
+        self.assertFalse(self.taps.tap("a", 1, 10.4))
+        self.assertTrue(self.taps.tap("a", 1, 10.6))
+
+    def test_clicks_of_another_hand_or_user_are_not_paired(self):
+        self.taps.tap("a", 1, 10.0)
+        self.assertFalse(self.taps.tap("a", 2, 10.1), "the other hand")
+        self.assertFalse(self.taps.tap("b", 1, 10.2), "another user")
+        self.assertTrue(self.taps.tap("a", 1, 10.3))
+
+    def test_a_click_reported_out_of_order_is_not_a_double_tap(self):
+        self.taps.tap("a", 1, 10.0)
+        self.assertFalse(self.taps.tap("a", 1, 9.9))
 
 
 def configuration(kinds):
@@ -238,11 +255,47 @@ class AppDecidesTests(unittest.TestCase):
         config = panel.app_decides_from(
             configuration([(panel.GESTURE_ONE_HAND_6DOF, 1), (panel.GESTURE_TWO_HAND_ROTATE, 1)])
         )
-        self.assertEqual(rules(config), [(panel.GESTURE_ONE_HAND_6DOF, 0), (panel.GESTURE_TWO_HAND_ROTATE, 0)])
+        self.assertEqual(
+            rules(config),
+            [(panel.GESTURE_ONE_HAND_6DOF, 0), (panel.GESTURE_TWO_HAND_ROTATE, 0), (panel.GESTURE_CLICK, 0)],
+        )
 
     def test_without_a_spread_the_turn_comes_first(self):
         config = panel.app_decides_from(configuration([(panel.GESTURE_ONE_HAND_6DOF, 1)]))
-        self.assertEqual(rules(config), [(panel.GESTURE_TWO_HAND_ROTATE, 0), (panel.GESTURE_ONE_HAND_6DOF, 0)])
+        self.assertEqual(
+            rules(config),
+            [(panel.GESTURE_TWO_HAND_ROTATE, 0), (panel.GESTURE_ONE_HAND_6DOF, 0), (panel.GESTURE_CLICK, 0)],
+        )
+
+    def ray(self, rule):
+        style = rule.controller_ray_style
+        return style.line_style, tuple(style.color)
+
+    def test_a_click_draws_a_solid_green_ray_and_the_others_keep_theirs(self):
+        default = configuration(self.QAROS_DEFAULT)
+        default.mapping_rules[2].controller_ray_style.line_style = panel.LINE_DOTTED
+        config = panel.app_decides_from(default)
+        click = config.mapping_rules[4]
+        self.assertEqual(click.gesture_kind, panel.GESTURE_CLICK)
+        self.assertEqual(self.ray(click), panel.CLICK_RAY)
+        self.assertEqual(self.ray(config.mapping_rules[3]), (panel.LINE_DOTTED, (2, 0, 0, 0)), "the hover's own ray")
+        self.assertEqual(self.ray(default.mapping_rules[3])[1], (3, 0, 0, 0), "a copy")
+
+    def test_a_volume_without_a_click_rule_gets_one_last(self):
+        config = panel.app_decides_from(configuration(self.QAROS_DEFAULT[:3]))
+        self.assertEqual(
+            rules(config),
+            [(panel.GESTURE_TWO_HAND_SCALE, 0), (panel.GESTURE_TWO_HAND_ROTATE, 0), (panel.GESTURE_ONE_HAND_6DOF, 0),
+             (panel.GESTURE_HOVER, 0), (panel.GESTURE_CLICK, 0)],
+        )
+        click = config.mapping_rules[4]
+        self.assertTrue(click.enabled)
+        self.assertEqual(click.header.type, panel.STRUCTURE_TYPE_GESTURE_MAPPING_RULE)
+        self.assertEqual(self.ray(click), panel.CLICK_RAY)
+
+    def test_a_full_configuration_gets_no_new_rule(self):
+        full = configuration([(panel.GESTURE_HOVER, 0)] * panel.MAX_MAPPING_RULES)
+        self.assertEqual(panel.app_decides_from(full).mapping_rule_count, panel.MAX_MAPPING_RULES)
 
     @unittest.skipUnless(ctypes.sizeof(ctypes.c_void_p) == 8, "64-bit layouts")
     def test_layouts_match_the_c_structures(self):

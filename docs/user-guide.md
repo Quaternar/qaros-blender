@@ -85,7 +85,7 @@ The scene streams into one app volume. Its name is the **App volume** field in t
 
 Change the name while stopped: **Stop streaming**, edit, **Start streaming**. Move, rotate and scale the volume like any other app volume.
 
-**Moving the content is a view change.** Moving, turning or scaling the scene in its volume (gestures in a headset, the Visualizer's mouse, **Fit scene to volume**) moves every user's camera over the scene: Blender's objects, and so its file and undo history, stay as they are. Only edits made on purpose change the scene: the panel's sliders, and a drag that grabs the object you selected (below).
+**Moving the content is a view change.** Moving, turning or scaling the scene in its volume (gestures in a headset, the Visualizer's mouse, **Fit scene to volume**) moves every user's camera over the scene: Blender's objects, and so its file and undo history, stay as they are. Only edits made on purpose change the scene: the panel's sliders, and the gestures of the **Object selection** tool (below).
 
 - **Placement:** the world origin of the scene sits at the centre of the app volume. Blender's Z-up becomes the room's up. **Fit scene to volume** (QAROS tab) places and scales the scene to fill the volume instead; it is not repeated when the scene changes.
 - **Size:** **Scale** (preferences) is room metres per Blender unit, 0.25 by default: a 4 m Blender scene fills a 1 m volume. It applies when the volume is first created. A volume that already exists keeps its own scale and position, including changes made in the room, across Blender restarts; to start over with the preference, stream into a new **App volume** name.
@@ -93,10 +93,11 @@ Change the name while stopped: **Stop streaming**, edit, **Start streaming**. Mo
 
 ## Controls panel in the headset
 
-While streaming, every user sees a **Blender** panel beside the app volume. It edits the **active** object:
+While streaming, every user sees a **Blender** panel beside the app volume. It edits the **active** object, whether it was selected in the headset or in Blender, and follows each new selection at once:
 
 | Tab | Edits |
 |---|---|
+| **Tools** | what hand gestures in the volume do: **Navigation** or **Object selection** ([below](#pointing-into-the-volume)) |
 | **Object** | location, rotation (degrees), scale |
 | **Material** | Principled base colour, roughness, metallic |
 | **Frame** | current frame, play |
@@ -110,23 +111,29 @@ While streaming, every user sees a **Blender** panel beside the app volume. It e
 
 ### Pointing into the volume
 
-| Gesture | Effect |
-|---|---|
-| Click an object | selects it and makes it active. A child moves in world space and keeps its parent; a collection instance selects and moves the object that instances it |
-| One-hand drag that grabs your selected object | moves that object in Blender |
-| One-hand drag anywhere else (empty space, another object, a panel's title bar) | pans the view (the scene in its volume); Blender's objects stay put |
-| Two hands apart or together, with an object selected | scales that object about its origin |
-| Two hands turning, with an object selected | turns that object about its origin, around the vertical |
-| Two hands apart or together, or turning, with nothing selected | zooms or turns the view about the volume's centre |
-| Click empty space | clears your selection |
+The tool decides what a gesture does. Choose it on the panel's **Tools** tab, or in the QAROS tab
+and the add-on's preferences (**Tool**); all three show the same tool, which holds for every user.
 
-- Blender decides what each gesture does, when it starts. **Hand gestures** in the add-on's
-  preferences: **Selected object, else view** (the table above), or **View only** (every gesture
-  moves the view).
+| Gesture | Navigation (the default) | Object selection |
+|---|---|---|
+| Click an object | nothing | selects it and makes it active |
+| Double tap an object (two clicks of one hand within half a second) | selects it and makes it active | selects it and makes it active |
+| One-hand drag | pans the view (the scene in its volume) | moves the selected object, when the drag starts on it |
+| Two hands apart or together | zooms the view about the volume's centre | scales the selected object about its origin |
+| Two hands turning | turns the view about the volume's centre | turns the selected object about its origin, around the vertical |
 
-- Your ray decides: while it rests on your selected object, a pinch grabs the object; once a hover
-  shows it elsewhere in the volume, a pinch moves the view. A pinch that grabs nothing in the
-  volume (on a panel's title bar, say) never moves an object.
+- Selecting picks with Blender's own ray cast against the scene, along the hand's ray. The object
+  becomes Blender's selected and active object: the viewport and outliner show it, and the panel
+  shows its values. A child moves in world space and keeps its parent; a collection instance
+  selects and moves the object that instances it.
+- A click or double tap on empty space keeps the selection: a pinch on the panel itself must not
+  take its object away. Deselect in Blender.
+- With **Object selection**, a gesture never moves the view. With nothing selected, or a one-hand
+  drag that does not start on the selected object (empty space, another object, a panel's title
+  bar), it does nothing, and Blender's console says why.
+- While a hand pinches for a click, and for a moment after, its ray turns solid green; then it is
+  the dotted white pointer again. A drag or two-hand gesture draws a darker green.
+- The selection shows in Blender's viewport. The stream shows no selection outline yet.
 - Moving a panel never moves the scene in Blender: panels stay where you put them, beside the
   volume when they first open.
 
@@ -170,6 +177,7 @@ Blender's own **File → Import → Universal Scene Description** gets the first
 | **Near**, **Far** | 0.1, 100 | depth range in Blender units; content outside it is not drawn | next start |
 | **Ambient light** | 0.3 | constant light on faces that no lamp reaches | next start |
 | **VisRTX materials** | Physically based (metal, grain) | on VisRTX: **Physically based** shows metal, highlights and emission, with grain on faces lit by the ambient light in a moving view; **Matte (smooth)** streams colour only, without grain | next start |
+| **Tool** | Navigation | what hand gestures in the app volume do ([Pointing into the volume](#pointing-into-the-volume)); also chosen on the panel's **Tools** tab and in the QAROS tab | at once |
 | **Controls panel in the headset** | every tab; Transform, Relations, Visibility | which tabs the [controls panel](#controls-panel-in-the-headset) shows, and the Blender panels on its **Panels** tab (**Default panels** restores them) | at once |
 
 ## Materials

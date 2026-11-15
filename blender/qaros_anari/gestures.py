@@ -1,15 +1,22 @@
 # SPDX-License-Identifier: MIT
 """Blender decides what a hand gesture does, without Blender: which gestures go to the view and which
-to the user's selected object, and the transforms each produces.
+to the selected object, by the active tool, and the transforms each produces.
 
 QAROS reports every manipulation gesture and applies none (panel.app_decides_from): the rays and
-hands still show, but the app transform stays where the add-on puts it. Per gesture, at its start:
+hands still show, but the app transform stays where the add-on puts it. The tool is chosen on the
+controls panel's Tools tab or in the add-on's preferences (one tool for every user). Per gesture, at
+its start:
 
-| Gesture               | The user selected an object and ...    | Otherwise                       |
-| --------------------- | -------------------------------------- | ------------------------------- |
-| one-hand drag         | grabbed it: moves it                   | pans the view                   |
-| two-hand spread/pinch | scales it about its origin             | zooms the view about the volume |
-| two-hand turn         | turns it about its origin, world up    | turns the view about the volume |
+| Gesture               | Navigation                        | Object selection                          |
+| --------------------- | --------------------------------- | ----------------------------------------- |
+| click                 | nothing                           | selects what the ray hits                 |
+| double tap            | selects what the ray hits         | selects what the ray hits                 |
+| one-hand drag         | pans the view                     | moves the selection, when it grabs it     |
+| two-hand spread/pinch | zooms the view about the volume   | scales the selection about its origin     |
+| two-hand turn         | turns the view about the volume   | turns the selection about its origin, up  |
+
+In Object selection a gesture never moves the view: with nothing selected, or a drag that does not
+grab the selection, it does nothing (and the add-on logs it).
 
 The view is the app transform (app pose and scale): the device renders each user's eyes in app
 content space, so changing it moves the camera over the scene and never touches a Blender object.
@@ -30,20 +37,35 @@ MANIPULATIONS = (ONE_HAND, TWO_HAND_SCALE, TWO_HAND_ROTATE)
 SCALE_DISTANCE = 0.3
 MIN_APP_SCALE, MAX_APP_SCALE = 1.0e-4, 1.0e4
 
-VIEW, OBJECT = "view", "object"
-# The add-on preference: Blender decides per gesture, or every gesture moves the view.
-POLICY_AUTO, POLICY_VIEW = "AUTO", "VIEW"
+VIEW, OBJECT, NOTHING = "view", "object", "nothing"
+# The tools, in the order the Tools tab and the preference list them: (id, name, description).
+# A tool added here shows on the page (it is drawn from the state message) and in the preferences.
+TOOL_NAVIGATE, TOOL_SELECT = "NAVIGATE", "SELECT"
+TOOLS = (
+    (TOOL_NAVIGATE, "Navigation", "Hand gestures pan, zoom and turn the whole scene"),
+    (TOOL_SELECT, "Object selection", "A click selects what the ray hits; hand gestures move only the selection"),
+)
+TOOL_IDS = tuple(tool for tool, _name, _description in TOOLS)
 
 
-def target(kind, policy, selected, on_selection):
-    """VIEW or OBJECT for a manipulation of `kind` starting now. `selected`: the user has a
-    selection; `on_selection`: their ray is on it (a one-hand drag grabs only what it points at; a
-    two-hand gesture has no single ray and takes the selection wherever the hands are)."""
-    if policy == POLICY_VIEW or not selected:
+def target(kind, tool, selected, on_selection):
+    """VIEW, OBJECT or NOTHING for a manipulation of `kind` starting now with `tool`. `selected`:
+    Blender has a selected object; `on_selection`: the user's ray is on it (a one-hand drag grabs
+    only what it points at; a two-hand gesture has no single ray and takes the selection wherever
+    the hands are)."""
+    if tool != TOOL_SELECT:
         return VIEW
-    if kind == ONE_HAND:
-        return OBJECT if on_selection else VIEW
+    if not selected:
+        return NOTHING
+    if kind == ONE_HAND and not on_selection:
+        return NOTHING
     return OBJECT
+
+
+def click_selects(tool, double_tap):
+    """Whether a click picks what its ray hits: every click with Object selection, a double tap
+    with any tool."""
+    return double_tap or tool == TOOL_SELECT
 
 
 def spread(translation):

@@ -15,14 +15,20 @@
   <button id="redo" class="icon" title="Redo">&#x21B7;</button>
 </header>
 <nav class="tabs" id="tabs">
-  <button data-tab="object" class="active">Object</button>
+  <button data-tab="tools" class="active">Tools</button>
+  <button data-tab="object">Object</button>
   <button data-tab="material">Material</button>
   <button data-tab="frame">Frame</button>
   <button data-tab="panels">Panels</button>
 </nav>
 <p id="no-tabs" class="note" hidden>Every tab is switched off in the add-on's preferences.</p>
 
-<section id="tab-object" class="tab active">
+<section id="tab-tools" class="tab active">
+  <div id="tool-list" class="tools"></div>
+  <p class="note">Double tap an object to select it, with any tool.</p>
+</section>
+
+<section id="tab-object" class="tab">
   <nav class="segments" id="groups">
     <button data-group="location" class="active">Location</button>
     <button data-group="rotation">Rotation</button>

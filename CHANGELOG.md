@@ -10,16 +10,24 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ### Added
 
-- Two hands scale or turn the selected object about its origin; with nothing selected they zoom
-  or turn the view. A two-hand turn about the vertical now works at all (QAROS's default rules had
-  none).
-- **Hand gestures** preference: **Selected object, else view** (the default) or **View only**.
+- **Tools** tab, first on the controls panel in the headset, and **Tool** in the QAROS tab and the
+  preferences: **Navigation** (the default; hand gestures pan, zoom and turn the whole scene) or
+  **Object selection** (a click selects what the hand's ray hits by Blender's ray cast; one-hand
+  drags, two-hand spreads and turns move only the selected object, and with nothing selected do
+  nothing). One tool for every user.
+- A double tap (two clicks of one hand within half a second) selects what the ray hits, with
+  either tool.
+- A hand's ray turns solid green while it pinches for a click and for a moment after.
+- Two hands scale or turn the selected object about its origin. A two-hand turn about the vertical
+  now works at all (QAROS's default rules had none).
 
 ### Changed
 
 - Blender decides what every hand gesture in the app volume does; QAROS only reports gestures and
   draws the rays. While streaming the add-on replaces the volume's gesture rules, and restores them
   when it stops.
+- One selection for every user, Blender's: the controls panel shows the object selected in the
+  headset as well as in Blender, and a click on empty space no longer clears it.
 
 ## [0.4.1] - 2026-11-15
 

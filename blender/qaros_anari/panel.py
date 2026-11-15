@@ -127,7 +127,14 @@ GESTURE_TWO_HAND_SCALE, GESTURE_TWO_HAND_ROTATE = 3, 4
 PHASE_STARTED, PHASE_UPDATED, PHASE_ENDED, PHASE_INSTANT, PHASE_CANCELED = 0, 1, 2, 3, 4
 MAPPING_NONE, MAPPING_APP_POSE = 0, 1
 SENSITIVITY_CONSTANT = 0
-AXIS_NONE, AXIS_Y = 0, 2
+AXIS_NONE, AXIS_Y, AXIS_ALL = 0, 2, 7
+STRUCTURE_TYPE_GESTURE_MAPPING_RULE = 0x5502
+# QarAppVolumeControllerRayLineStyle values (types.h).
+LINE_NONE, LINE_SOLID, LINE_DOTTED = 0, 1, 2
+# The ray of a pinch that clicks: solid green while the hand pinches and for a moment after the
+# release (QAROS keeps a click's style 0.4 s), then the hover's dotted white again. Brighter than
+# the manipulations' green (0, 200, 0), so a pinch that becomes a drag still darkens.
+CLICK_RAY = (LINE_SOLID, (0, 255, 0, 255))
 
 GESTURE_CALLBACK = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p)
 
@@ -384,6 +391,14 @@ class ServedPanel:
 MANIPULATION_KINDS = (GESTURE_ONE_HAND_6DOF, GESTURE_TWO_HAND_SCALE, GESTURE_TWO_HAND_ROTATE)
 
 
+def set_ray(rule, style):
+    """Gives `rule` the ray `style`, (line style, (r, g, b, a))."""
+    line, color = style
+    rule.controller_ray_style.line_style = line
+    for index, channel in enumerate(color):
+        rule.controller_ray_style.color[index] = channel
+
+
 def _copy_rule(target, source):
     ctypes.memmove(ctypes.byref(target), ctypes.byref(source), ctypes.sizeof(MappingRule))
 
@@ -392,7 +407,8 @@ def app_decides_from(default):
     """A copy of the volume's default gesture configuration in which no gesture moves the app: QAROS
     reports each one and draws its ray as before, and the add-on decides what it does.
     Manipulations report hand metres (precision 1, constant sensitivity). A two-hand turn about the
-    vertical is added after the two-hand spread when the default has none (QAROS's does not)."""
+    vertical is added after the two-hand spread when the default has none (QAROS's does not). A
+    click draws CLICK_RAY; a click rule is added last when the default has none."""
     config = GestureConfiguration()
     ctypes.memmove(ctypes.byref(config), ctypes.byref(default), ctypes.sizeof(GestureConfiguration))
     count = min(config.mapping_rule_count, MAX_MAPPING_RULES)
@@ -403,6 +419,20 @@ def app_decides_from(default):
         if rule.gesture_kind in MANIPULATION_KINDS:
             rule.precision = 1.0
             rule.app_scale_sensitivity_mode = SENSITIVITY_CONSTANT
+        if rule.gesture_kind == GESTURE_CLICK:
+            set_ray(rule, CLICK_RAY)
+    if GESTURE_CLICK not in kinds and count < MAX_MAPPING_RULES:
+        click = config.mapping_rules[count]
+        click.header.type = STRUCTURE_TYPE_GESTURE_MAPPING_RULE
+        click.gesture_kind = GESTURE_CLICK
+        click.enabled = True
+        click.precision = 1.0
+        click.translation_axes = click.rotation_axes = AXIS_ALL
+        click.enable_gestures_from_outside_of_volume = True
+        click.app_transform_mapping = MAPPING_NONE
+        set_ray(click, CLICK_RAY)
+        count += 1
+        config.mapping_rule_count = count
     if GESTURE_TWO_HAND_ROTATE in kinds or count >= MAX_MAPPING_RULES:
         return config
     at = kinds.index(GESTURE_TWO_HAND_SCALE) + 1 if GESTURE_TWO_HAND_SCALE in kinds else 0

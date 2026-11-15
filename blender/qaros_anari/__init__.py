@@ -23,7 +23,7 @@ from .hub_launch import (
     stdin_is_pipe,
 )
 from .controls import Controls
-from .gestures import POLICY_AUTO, POLICY_VIEW
+from .gestures import TOOL_IDS, TOOL_NAVIGATE, TOOLS
 from .protocol import panel_names, toggled_panel
 from .materials import material_descriptions
 from .panel import QarError, Runtime, ServedPanel, VolumeGestures
@@ -121,18 +121,17 @@ class Preferences(bpy.types.AddonPreferences):
         ),
         default=VISRTX_PHYSICAL,
     )
-    hand_gestures: bpy.props.EnumProperty(
-        name="Hand gestures",
-        description="What one-hand drags and two-hand spreads and turns in the app volume do",
-        items=(
-            (POLICY_AUTO, "Selected object, else view",
-             "A drag that grabs your selected object moves it, two hands scale or turn it; with nothing "
-             "selected every gesture moves the view", 0),
-            (POLICY_VIEW, "View only", "Every gesture moves the view, never an object", 1),
+    tool: bpy.props.EnumProperty(
+        name="Tool",
+        description=(
+            "What hand gestures in the app volume do, for every user; also chosen on the Tools tab of "
+            "the controls panel in the headset. A double tap selects with either tool"
         ),
-        default=POLICY_AUTO,
+        items=tuple((tool, name, description, index) for index, (tool, name, description) in enumerate(TOOLS)),
+        default=TOOL_NAVIGATE,
     )
     # What the controls panel in the headset shows (docs/DEVELOPING.md).
+    show_tools_tab: bpy.props.BoolProperty(name="Tools", description="Navigation or Object selection tab", default=True)
     show_object_tab: bpy.props.BoolProperty(name="Object", description="Location, rotation and scale tab", default=True)
     show_material_tab: bpy.props.BoolProperty(name="Material", description="Base colour, roughness and metallic tab", default=True)
     show_frame_tab: bpy.props.BoolProperty(name="Frame", description="Frame and Play tab", default=True)
@@ -157,13 +156,13 @@ class Preferences(bpy.types.AddonPreferences):
         row.prop(self, "far")
         layout.prop(self, "ambient")
         layout.prop(self, "visrtx_materials")
-        layout.prop(self, "hand_gestures")
+        layout.prop(self, "tool")
         self.draw_controls_panel(layout.box())
 
     def draw_controls_panel(self, box):
         box.label(text="Controls panel in the headset")
         row = box.row(align=True)
-        for name in ("show_object_tab", "show_material_tab", "show_frame_tab", "show_panels_tab"):
+        for name in ("show_tools_tab", "show_object_tab", "show_material_tab", "show_frame_tab", "show_panels_tab"):
             row.prop(self, name, toggle=True)
         if not self.show_panels_tab:
             return
@@ -189,6 +188,7 @@ def controls_settings():
     """(switched-on tabs, chosen panel class names) from the preferences: read every tick."""
     prefs = preferences()
     switches = {
+        "tools": prefs.show_tools_tab,
         "object": prefs.show_object_tab,
         "material": prefs.show_material_tab,
         "frame": prefs.show_frame_tab,
@@ -197,9 +197,24 @@ def controls_settings():
     return tuple(tab for tab, on in switches.items() if on), panel_names(prefs.controls_panels)
 
 
-def gesture_policy():
-    """The Hand gestures preference: read every tick."""
-    return preferences().hand_gestures
+def gesture_tool():
+    """The Tool preference: read every tick. An id this add-on does not know reads as Navigation."""
+    tool = preferences().tool
+    return tool if tool in TOOL_IDS else TOOL_NAVIGATE
+
+
+def set_gesture_tool(tool):
+    """The Tools tab in the headset chose `tool`: the preference, so Blender's UI shows it too."""
+    prefs = preferences()
+    if prefs.tool == tool:
+        return
+    prefs.tool = tool
+    if bpy.context.preferences.addons.get(__package__) is not None:
+        bpy.context.preferences.is_dirty = True
+    for window in bpy.context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type in ("VIEW_3D", "PREFERENCES"):
+                area.tag_redraw()
 
 
 class QAROS_OT_toggle_controls_panel(bpy.types.Operator):
@@ -214,6 +229,21 @@ class QAROS_OT_toggle_controls_panel(bpy.types.Operator):
         prefs = preferences()
         prefs.controls_panels = toggled_panel(prefs.controls_panels, self.panel)
         context.preferences.is_dirty = True
+        return {"FINISHED"}
+
+
+class QAROS_OT_set_tool(bpy.types.Operator):
+    bl_idname = "qaros.set_tool"
+    bl_label = "Tool"
+    bl_description = "What hand gestures in the app volume do, for every user (also the Tools tab in the headset)"
+    bl_options = {"INTERNAL"}
+
+    tool: bpy.props.EnumProperty(
+        items=tuple((tool, name, description, index) for index, (tool, name, description) in enumerate(TOOLS))
+    )
+
+    def execute(self, context):
+        set_gesture_tool(self.tool)
         return {"FINISHED"}
 
 
@@ -456,13 +486,13 @@ class Streamer:
         try:
             self.runtime = Runtime(library)
             self.panel = ServedPanel(self.runtime, session, volume_id, self.volume.name, self.volume.display_name)
-            self.controls = Controls(self.panel, controls_settings, gesture_policy)
+            self.controls = Controls(self.panel, controls_settings, gesture_tool, set_gesture_tool)
             log("controls panel opened beside the app volume")
             try:
                 self.controls.attach_gestures(
                     VolumeGestures(self.runtime, session, volume_id, self.controls.receive_gesture)
                 )
-                log("hand gestures in the app volume: Blender moves the view or the selected object")
+                log("hand gestures in the app volume: Blender moves the view or the selected object, by the tool")
             except (QarError, OSError) as error:
                 # The panel works without it: only picking in the volume is missing.
                 log(f"pointing into the app volume not available: {error}")
@@ -735,6 +765,16 @@ def draw_streams_to(layout, scene):
         row.label(text=warning, icon="ERROR")
 
 
+def draw_tool(layout):
+    """The tool hand gestures use, as the Tools tab in the headset shows it. Buttons of an operator,
+    not the preference itself: a Blender QAROS started with --addons alone has no preferences entry
+    to draw (preferences())."""
+    current = gesture_tool()
+    row = layout.row(align=True)
+    for tool, name, _description in TOOLS:
+        row.operator(QAROS_OT_set_tool.bl_idname, text=name, depress=tool == current).tool = tool
+
+
 class QAROS_PT_panel(bpy.types.Panel):
     bl_label = "QAROS"
     bl_space_type = "VIEW_3D"
@@ -790,6 +830,8 @@ class QAROS_PT_panel(bpy.types.Panel):
                 row = layout.row()
                 row.alert = True
                 row.label(text="No controls panel (see the console)", icon="ERROR")
+            if STREAMER.controls is not None and STREAMER.controls.gestures is not None:
+                draw_tool(layout)
             layout.operator(QAROS_OT_fit_volume.bl_idname, icon="FULLSCREEN_ENTER")
             draw_streams_to(layout, context.scene)
             layout.operator(QAROS_OT_stop.bl_idname, icon="PAUSE")
@@ -827,6 +869,7 @@ def redraw_panels():
 CLASSES = (
     Preferences,
     QAROS_OT_toggle_controls_panel,
+    QAROS_OT_set_tool,
     QAROS_OT_reset_controls_panels,
     QAROS_OT_start,
     QAROS_OT_stop,

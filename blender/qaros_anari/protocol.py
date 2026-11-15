@@ -7,6 +7,7 @@ Page -> add-on (one JSON value per message):
   {"t": "set", "key": K, "index": i, "value": v, "final": b}
                                                          one control moved; `final` on release
   {"t": "call", "id": n, "name": "undo" | "redo" | "play"}
+  {"t": "tool", "value": T}                              choose the tool hand gestures use (gestures.TOOLS)
   {"t": "prop", "id": F, "index": i, "value": v, "final": b}
                                                          one field of a replayed Blender panel;
                                                          checked against that field (coerce_prop)
@@ -25,6 +26,8 @@ VECTOR_KEYS = {"location": 3, "rotation": 3, "scale": 3, "color": 3}
 # Keys with one value.
 SCALAR_KEYS = {"roughness", "metallic", "frame"}
 CALLS = {"undo", "redo", "play"}
+# The tool ids a `tool` message may name (gestures.TOOL_IDS; protocol.py stays free of imports).
+TOOL_IDS = ("NAVIGATE", "SELECT")
 # What a value is held to, so a malformed or hostile message cannot put Blender far off.
 LIMITS = {
     "location": (-1.0e4, 1.0e4),
@@ -68,12 +71,18 @@ class Hello:
     user: str
 
 
+@dataclass(frozen=True)
+class ToolSet:
+    tool: str
+    user: str
+
+
 class Refused(ValueError):
     pass
 
 
 def parse(text, user):
-    """One page message as a Set, Call or Hello. Raises Refused for anything else: every
+    """One page message as a Set, PropSet, Call, ToolSet or Hello. Raises Refused for anything else: every
     message is user input, and only these shapes are acted on."""
     if len(text) > MAX_MESSAGE_BYTES:
         raise Refused("message too large")
@@ -86,6 +95,11 @@ def parse(text, user):
     kind = message.get("t")
     if kind == "hello":
         return Hello(user)
+    if kind == "tool":
+        tool = message.get("value")
+        if tool not in TOOL_IDS:
+            raise Refused("unknown tool")
+        return ToolSet(tool, user)
     if kind == "call":
         call_id, name = message.get("id"), message.get("name")
         if not isinstance(call_id, int) or isinstance(call_id, bool) or name not in CALLS:
@@ -205,7 +219,7 @@ class EditQueue:
 
 
 # The page's tabs, in page order; the add-on's preferences switch each on or off.
-TABS = ("object", "material", "frame", "panels")
+TABS = ("tools", "object", "material", "frame", "panels")
 # The tab whose controls send a `set` of a key, or a `call` of a name. Undo and redo are in the
 # header, on every tab.
 KEY_TABS = {"location": "object", "rotation": "object", "scale": "object",
@@ -220,6 +234,8 @@ def shown(item, tabs):
         return KEY_TABS[item.key] in tabs
     if isinstance(item, PropSet):
         return "panels" in tabs
+    if isinstance(item, ToolSet):
+        return "tools" in tabs
     if isinstance(item, Call):
         return item.name not in CALL_TABS or CALL_TABS[item.name] in tabs
     return True
