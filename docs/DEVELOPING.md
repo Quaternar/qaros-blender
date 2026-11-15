@@ -72,10 +72,18 @@ sequenceDiagram
   crashed, or the hub restarted under it) is taken over by `get_or_create`, which keeps its place
   and points it at this run's bundle; a runtime from before that rule leaves such a panel on the
   earlier run's bundle, shown as "Page not available".
-- **Pointing** (`pointing.py`): a click selects by Blender's ray cast and switches that user's
-  one-hand drag to the object. The ray cast reports a collection instance as its prototype; the
-  pick maps it to the instancing object through the depsgraph's instances (matched by matrix), so
-  a drag never moves the prototype inside every instance.
+- **Pointing** (`pointing.py`): a click selects by Blender's ray cast. The ray cast reports a
+  collection instance as its prototype; the pick maps it to the instancing object through the
+  depsgraph's instances (matched by matrix), so a drag never moves the prototype inside every
+  instance.
+- **View, not model:** the app pose and app scale (gestures, the Visualizer's Content mode,
+  `qar.fitBox`) are a camera transform: the device renders each eye in app content space, so the
+  add-on never writes a Blender object for them. Only a one-hand drag that grabbed the user's
+  selection moves it: the user is in the object mode (one-hand drag reported, not mapped) only
+  while their latest hover picks their selection (`Controls.follow_hovers`, one ray cast per new
+  hover, never during their drag), and a drag in that mode moves the object only when its own
+  hit, else the hand's latest hover, picks the selection (`Controls.aimed`). A pinch on a GUI panel
+  or on empty space reaches the volume without a hit and moves nothing.
 - **Stop from QAROS** (`hub_launch.py`): a QAROS launcher stops an app by closing its stdin, asking
   it to close and terminating it one second later. When QAROS started Blender (`QAR_INSTANCE` set,
   stdin a pipe), the add-on watches stdin and quits Blender at once; Blender writes `quit.blend`

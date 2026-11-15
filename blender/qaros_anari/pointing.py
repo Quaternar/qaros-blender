@@ -2,6 +2,13 @@
 """Pointing into the app volume, without Blender: where a gesture's points are in Blender's world,
 the ray a click casts, and what each user's one-hand drag does to the object they selected.
 
+Moving, turning or scaling the app volume's content (a one-hand drag in the default mode, every
+two-hand gesture, Fit scene to volume) is a view change: the device renders each user's eyes in app
+content space, so it moves the camera over the scene and never touches a Blender object. Only a
+one-hand drag that grabs the user's selected object edits the scene. A user is in the object mode
+only while their ray is on their selection: a drag anywhere else, a GUI panel's title bar included,
+stays a view change.
+
 A gesture's points are in app content space: the ANARI world the add-on builds, which is Blender's
 world with Y up (sync.py: Blender (x, y, z) -> (x, z, -y)), unscaled. A one-hand drag's
 translation is the grabbed point's accumulated motion (it rides the hand's ray) in app volume
@@ -120,10 +127,23 @@ class Pointing:
         self.selected[peer] = object_name
         return "object"
 
-    def drag_started(self, peer, gesture_id, object_world):
-        """A one-hand drag began; returns the object it moves, or None (no selection)."""
+    def wanted_mode(self, peer, aimed_name):
+        """The mode `peer` needs while their ray is on `aimed_name` (None: on nothing Blender
+        picks): 'object' only on their own selection, so a one-hand drag grabs it; 'default'
+        everywhere else, so a drag moves the view."""
         name = self.selected.get(peer)
-        if name is None:
+        return "object" if name is not None and aimed_name == name else "default"
+
+    def dragging(self, peer):
+        """Whether `peer` is moving an object now: their mode is left alone until it ends."""
+        return any(key[0] == peer for key in self.drags)
+
+    def drag_started(self, peer, gesture_id, object_world, grabbed_name):
+        """A one-hand drag began on `grabbed_name` (what its ray hit, None: nothing); returns the
+        object it moves, or None. Only a drag that grabbed the user's selection moves it: a pinch
+        on a GUI panel or on empty space reaches the volume too and must move nothing."""
+        name = self.selected.get(peer)
+        if name is None or grabbed_name != name:
             return None
         self.drags[(peer, gesture_id)] = Drag(name, tuple(object_world))
         return name

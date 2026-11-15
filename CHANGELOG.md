@@ -8,6 +8,13 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ## [Unreleased]
 
+### Fixed
+
+- Moving, turning or scaling the app volume's content only changes the view, never Blender's
+  scene: after a click selected an object, a one-hand drag moves that object only when it grabs
+  it. A drag anywhere else (the controls panel's title bar, empty space, another object) moves the
+  view, or nothing, and leaves Blender's objects where they are.
+
 ## [0.4.0] - 2026-11-15
 
 ### Added
