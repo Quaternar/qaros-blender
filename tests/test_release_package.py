@@ -43,7 +43,7 @@ class PackageTests(unittest.TestCase):
         version = f"{package_release.planned_version()}-pr.1"
         with tempfile.TemporaryDirectory() as out:
             archive, manifest_path = package_release.package(version, Path(out))
-            self.assertEqual(archive.name, f"qaros_anari-{version}.zip")
+            self.assertEqual(archive.name, f"qaros_blender_anari-{version}.zip")
             with zipfile.ZipFile(archive) as opened:
                 names = opened.namelist()
             self.assertIn("qaros_anari/__init__.py", names)

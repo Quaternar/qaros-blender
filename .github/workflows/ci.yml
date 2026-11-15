@@ -26,4 +26,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: qaros_anari
-          path: dist/qaros_anari.zip
+          path: dist/qaros_blender_anari.zip

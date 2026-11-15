@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Write the release assets of the add-on: qaros_anari-<version>.zip and manifest.json.
+"""Write the release assets of the add-on: qaros_blender_anari-<version>.zip and manifest.json.
 
     python tools/package_release.py --check                       # VERSION equals bl_info["version"]
     python tools/package_release.py [--version 0.4.0] [--out-dir dist/release]
@@ -10,7 +10,7 @@ its root). manifest.json describes it for the QAROS Visualizer's Blender tile, w
 latest release, in the format of the other QAROS app releases (qaros-rerun):
 
     {"version": 1, "release": "0.4.0", "package": "qaros-blender",
-     "assets": [{"name": "qaros_anari-0.4.0.zip", "sha256": "...", "size": 123, "platform": "any",
+     "assets": [{"name": "qaros_blender_anari-0.4.0.zip", "sha256": "...", "size": 123, "platform": "any",
                  "app_version": "0.4.0", "min_qaros_version": "0.9.0",
                  "min_blender_version": "4.5.0", "addon_module": "qaros_anari"}]}
 
@@ -34,6 +34,8 @@ ADDON_INIT = build_zip.ADDON / "__init__.py"
 MANIFEST_FORMAT = 1
 PACKAGE = "qaros-blender"
 ADDON_MODULE = "qaros_anari"
+# The release ZIP is named after the repository, the folder inside it after the add-on module.
+ARCHIVE_STEM = "qaros_blender_anari"
 PLATFORM = "any"
 # The oldest QAROS whose ANARI device the add-on streams with. Newer features (the controls panel,
 # pointing) are reported and left out on an older runtime, so this moves only when streaming itself
@@ -99,7 +101,7 @@ def sha256(path):
 
 def package(version, out_dir):
     out_dir.mkdir(parents=True, exist_ok=True)
-    archive = out_dir / f"{ADDON_MODULE}-{version}.zip"
+    archive = out_dir / f"{ARCHIVE_STEM}-{version}.zip"
     build_zip.build(archive)
     asset = {
         "name": archive.name,

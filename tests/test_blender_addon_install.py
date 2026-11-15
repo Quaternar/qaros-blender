@@ -76,7 +76,7 @@ class InstalledAddonTests(unittest.TestCase):
     def test_install_from_disk_then_start_as_the_blender_tile_does(self):
         with tempfile.TemporaryDirectory(prefix="qaros-blender-install-") as temp:
             temp = Path(temp)
-            archive = temp / "qaros_anari.zip"
+            archive = temp / "qaros_blender_anari.zip"
             build_zip.build(archive)
             user = temp / "user"
             user.mkdir()

@@ -26,7 +26,7 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 - A Blender started with `--addons qaros_anari` alone (QAROS starts Blender so) streams with the
   preferences' defaults when Blender's preferences do not list the add-on, as in a portable or
   never-started Blender, instead of failing with `key "qaros_anari" not found`.
-- Releases on GitHub: `qaros_anari-<version>.zip` for **Install from Disk** and a `manifest.json`
+- Releases on GitHub: `qaros_blender_anari-<version>.zip` for **Install from Disk** and a `manifest.json`
   from which the QAROS Visualizer's Blender tile installs the latest add-on. The first release is
   0.4.0, above the 0.3.1 that QAROS builds carried, so those installs are offered the update.
 - With **ANARI folder** empty, the add-on loads the ANARI device of the QAROS that started Blender

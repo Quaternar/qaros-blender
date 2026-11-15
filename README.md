@@ -25,7 +25,7 @@ Either way installs the latest [release](https://github.com/Quaternar/qaros-blen
 
 - **From QAROS:** the QAROS Visualizer's **Blender** tile (Sources) downloads the latest release of
   the add-on and starts Blender with it; the add-on then starts streaming by itself.
-- **By hand:** download `qaros_anari-<version>.zip` from the
+- **By hand:** download `qaros_blender_anari-<version>.zip` from the
   [latest release](https://github.com/Quaternar/qaros-blender/releases/latest). Blender: **Edit →
   Preferences → Add-ons → Install from Disk**, pick the ZIP, enable **QAROS ANARI Streaming**. Then
   3D View sidebar (`N`) → **QAROS** tab → **Start streaming**.

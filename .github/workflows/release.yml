@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 #
 # A tag vX.Y.Z (release) or vX.Y.Z-rc.N (release candidate) packages the add-on and publishes a
-# GitHub release with qaros_anari-<version>.zip (the ZIP Blender's Install from Disk takes) and
+# GitHub release with qaros_blender_anari-<version>.zip (the ZIP Blender's Install from Disk takes) and
 # manifest.json, which the QAROS Visualizer's Blender tile downloads the latest release from.
 # Tags are the add-on's own version; X.Y.Z must equal the file VERSION, which must equal
 # bl_info["version"] (tools/package_release.py). See docs/DEVELOPING.md, "Releasing".
@@ -84,7 +84,7 @@ jobs:
         run: python tools/package_release.py --version "${{ steps.version.outputs.version }}" --out-dir dist/release
       - uses: actions/upload-artifact@v4
         with:
-          name: qaros_anari-${{ steps.version.outputs.version }}
+          name: qaros_blender_anari-${{ steps.version.outputs.version }}
           path: |
             dist/release/*.zip
             dist/release/manifest.json
@@ -101,7 +101,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: qaros_anari-${{ needs.package.outputs.version }}
+          name: qaros_blender_anari-${{ needs.package.outputs.version }}
           path: release
       - name: Check the assets against manifest.json
         run: |
@@ -120,6 +120,6 @@ jobs:
             if [[ "$VERSION" == *-* ]]; then flags+=(--prerelease); fi
             gh release create "$TAG" release/* --repo "$GITHUB_REPOSITORY" --verify-tag \
               --title "qaros-blender $VERSION" \
-              --notes "QAROS ANARI Streaming add-on for Blender $VERSION. Install it from the QAROS Visualizer's Blender tile, or in Blender with Edit > Preferences > Add-ons > Install from Disk and qaros_anari-$VERSION.zip. manifest.json lists the ZIP's SHA-256, the QAROS and Blender versions it needs. Changes: https://github.com/$GITHUB_REPOSITORY/blob/$TAG/CHANGELOG.md" \
+              --notes "QAROS ANARI Streaming add-on for Blender $VERSION. Install it from the QAROS Visualizer's Blender tile, or in Blender with Edit > Preferences > Add-ons > Install from Disk and qaros_blender_anari-$VERSION.zip. manifest.json lists the ZIP's SHA-256, the QAROS and Blender versions it needs. Changes: https://github.com/$GITHUB_REPOSITORY/blob/$TAG/CHANGELOG.md" \
               "${flags[@]}"
           fi

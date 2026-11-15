@@ -58,7 +58,7 @@ def enable_addon():
         sys.path.insert(0, OPTIONS["addon_dir"])
     addon_utils.enable("qaros_anari", default_set=True, handle_error=lambda error: log(f"add-on failed: {error!r}"))
     if "qaros_anari" not in bpy.context.preferences.addons:
-        log("the QAROS ANARI Streaming add-on is not installed: install qaros_anari.zip or pass --addon-dir")
+        log("the QAROS ANARI Streaming add-on is not installed: install qaros_blender_anari.zip or pass --addon-dir")
         return None
     import qaros_anari
 

@@ -9,7 +9,7 @@
 | `tests/` | unit tests (plain Python), Blender tests (background mode), device tests |
 | `tests/usd/` | USD scenes for the USD tests |
 | `tools/run_tests.py` | runs the tests, see [Tests](#tests) |
-| `tools/build_zip.py` | writes `dist/qaros_anari.zip` |
+| `tools/build_zip.py` | writes `dist/qaros_blender_anari.zip` |
 | `tools/package_release.py` | checks `VERSION` against `bl_info["version"]`; writes the release assets |
 | `VERSION` | the next planned release `X.Y.Z`, equal to `bl_info["version"]` |
 | `.github/workflows/release.yml` | packages every pull request, publishes a release on a `v*` tag |
@@ -138,7 +138,7 @@ per version with the add-on ZIP and a `manifest.json`. The QAROS Visualizer's Bl
 
 | Asset | What it is |
 |---|---|
-| `qaros_anari-<version>.zip` | the folder `qaros_anari/` at the root: the ZIP Blender's **Install from Disk** takes |
+| `qaros_blender_anari-<version>.zip` | the folder `qaros_anari/` at the root: the ZIP Blender's **Install from Disk** takes |
 | `manifest.json` | the release, for the Visualizer's Blender tile |
 
 ```json
@@ -148,7 +148,7 @@ per version with the add-on ZIP and a `manifest.json`. The QAROS Visualizer's Bl
   "package": "qaros-blender",
   "assets": [
     {
-      "name": "qaros_anari-0.4.0.zip",
+      "name": "qaros_blender_anari-0.4.0.zip",
       "sha256": "<64 lower-case hex digits>",
       "size": 123456,
       "platform": "any",
