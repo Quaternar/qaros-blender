@@ -537,6 +537,10 @@ class SceneMirror:
         self.batched = {}  # object name -> (chunk, transform baked into it)
         self.dynamic = {}  # object that left a chunk -> when it last moved or changed (monotonic)
         self.captured = []  # the latest snapshot's instances, which settle() places again
+        # The selection outline: every instance of an object carries the object's ANARI `id`, the
+        # same for the whole session, and qar.selection names the selected object's.
+        self.object_ids = {}  # object name -> id of its instances
+        self.selected = None  # object name the stream outlines, or None
 
     @property
     def objects(self):
@@ -674,16 +678,19 @@ class SceneMirror:
 
     def mergeable(self, name, count):
         parts = self.parts.get(name)
-        return count == 1 and bool(parts) and name not in self.batched and name not in self.dynamic
+        return (count == 1 and bool(parts) and name not in self.batched and name not in self.dynamic
+                and name != self.selected)
 
     def update_batches(self, counts, transforms, now):
         """Batched objects that moved, changed shape or gained instances leave their chunk and stay
         standalone until they have been still for SETTLE_SECONDS; enough static objects of one
         material join one."""
         for name, (_chunk, transform) in list(self.batched.items()):
-            if counts.get(name) != 1 or transforms[name] != transform:
+            moved = counts.get(name) != 1 or transforms[name] != transform
+            # The selected object needs an instance of its own: a chunk's instance has no one id.
+            if moved or name == self.selected:
                 self.leave_batch(name)
-                if name in counts:
+                if moved and name in counts:
                     self.dynamic[name] = now
         for name in [name for name, changed in self.dynamic.items() if now - changed >= SETTLE_SECONDS]:
             del self.dynamic[name]
@@ -895,6 +902,7 @@ class SceneMirror:
             if handle is None or group != entry[0]:
                 handle = device.new("Instance", "transform")
                 device.set(handle, "group", anari.GROUP, entry[0])
+                device.set(handle, "id", anari.UINT32, self.object_id(name))
             elif previous == transform:
                 slots[key] = (handle, group, previous)
                 continue
@@ -909,6 +917,32 @@ class SceneMirror:
         if instances == self.instances:
             return moved
         self.replace_list("instance", anari.INSTANCE, instances, "instances", keep=set(instances))
+        return True
+
+    # Selection outline ---------------------------------------------------------------------------
+
+    def object_id(self, name):
+        """The ANARI `id` of `name`'s instances, given once and kept for the session: the device
+        matches qar.selection against the instanceId channel."""
+        if name not in self.object_ids:
+            self.object_ids[name] = len(self.object_ids) + 1
+        return self.object_ids[name]
+
+    def selection_parameter(self):
+        """qar.selection for the selected object: its id, or empty for none."""
+        return str(self.object_id(self.selected)) if self.selected is not None else ""
+
+    def select(self, name, now=None):
+        """Outlines `name` (None: nothing) in the stream. A batched object first leaves its chunk,
+        so it is drawn by an instance with its own id; the world is committed before the device
+        names that id. True when the selection changed."""
+        if name == self.selected:
+            return False
+        self.selected = name
+        if self.place(self.captured, time.monotonic() if now is None else now):
+            self.device.commit(self.world)
+        self.device.set(self.device.handle, "qar.selection", anari.STRING, self.selection_parameter())
+        self.device.commit()
         return True
 
     def update_lights(self, captured, environment=None):
@@ -981,6 +1015,10 @@ class SceneMirror:
         device.release(self.renderer)
 
 
+# SyncWorker.selection when no new selection waits.
+UNCHANGED = object()
+
+
 class SyncWorker:
     """The one thread that applies snapshots to the mirror. `submit` never blocks: a snapshot the
     worker has not started yet absorbs the newer one. After a failed apply, `failed` stays set until
@@ -991,6 +1029,7 @@ class SyncWorker:
         self.on_error = on_error
         self.condition = threading.Condition()
         self.pending = None
+        self.selection = UNCHANGED  # object name to outline next, None for none
         self.closing = False
         self.applying = False
         self.failed = False
@@ -1002,6 +1041,12 @@ class SyncWorker:
             self.pending = snapshot if self.pending is None else self.pending.absorb(snapshot)
             self.condition.notify_all()
 
+    def select(self, name):
+        """Outlines `name` (None: nothing) once the snapshots submitted before are applied."""
+        with self.condition:
+            self.selection = name
+            self.condition.notify_all()
+
     def take_failure(self):
         with self.condition:
             failed, self.failed = self.failed, False
@@ -1010,11 +1055,13 @@ class SyncWorker:
     def run(self):
         while True:
             with self.condition:
-                if self.pending is None and not self.closing and not self.settle_due():
+                if (self.pending is None and self.selection is UNCHANGED and not self.closing
+                        and not self.settle_due()):
                     self.condition.wait(self.poll_wait())
                 if self.closing:
                     return
                 snapshot, self.pending = self.pending, None
+                selection, self.selection = self.selection, UNCHANGED
                 self.applying = True
             failed = False
             try:
@@ -1024,6 +1071,8 @@ class SyncWorker:
                     self.mirror.apply(snapshot)
                 elif self.settle_due():
                     self.mirror.settle()
+                if selection is not UNCHANGED:
+                    self.mirror.select(selection)
             except Exception as error:  # noqa: BLE001 - reported, the next sync is a full one
                 failed = True
                 if snapshot is None:
@@ -1052,12 +1101,15 @@ class SyncWorker:
     def wait_idle(self, timeout=None):
         """Until every submitted snapshot is applied (tests, and before a full stop)."""
         with self.condition:
-            return self.condition.wait_for(lambda: self.pending is None and not self.applying, timeout)
+            return self.condition.wait_for(
+                lambda: self.pending is None and self.selection is UNCHANGED and not self.applying, timeout
+            )
 
     def close(self):
         """Stops after the snapshot being applied; one still pending is dropped."""
         with self.condition:
             self.closing = True
             self.pending = None
+            self.selection = UNCHANGED
             self.condition.notify_all()
         self.thread.join()

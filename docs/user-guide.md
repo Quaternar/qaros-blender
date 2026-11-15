@@ -133,7 +133,9 @@ and the add-on's preferences (**Tool**); all three show the same tool, which hol
   bar), it does nothing, and Blender's console says why.
 - While a hand pinches for a click, and for a moment after, its ray turns solid green; then it is
   the dotted white pointer again. A drag or two-hand gesture draws a darker green.
-- The selection shows in Blender's viewport. The stream shows no selection outline yet.
+- The selected object is outlined in the headset as in Blender's viewport, in Blender's orange,
+  whether it was selected in the headset or in Blender. On **VisGL** the stream shows no outline:
+  that backend renders no object ids. VisRTX, OSPRay and Helide outline it.
 - Moving a panel never moves the scene in Blender: panels stay where you put them, beside the
   volume when they first open.
 

@@ -59,6 +59,9 @@ class FakeWorker:
     def submit(self, snapshot):
         pass
 
+    def select(self, name):
+        pass
+
 
 class Layout:
     """Records the labels and buttons a draw function puts on the panel."""

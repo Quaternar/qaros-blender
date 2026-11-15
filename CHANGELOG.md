@@ -20,6 +20,9 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 - A hand's ray turns solid green while it pinches for a click and for a moment after.
 - Two hands scale or turn the selected object about its origin. A two-hand turn about the vertical
   now works at all (QAROS's default rules had none).
+- The selected object is outlined in the headset, in Blender's orange, as in Blender's viewport:
+  selected in the headset or in Blender. Needs a QAROS whose ANARI device draws the selection
+  outline, and a backend that renders object ids (VisRTX, OSPRay, Helide; not VisGL).
 
 ### Changed
 

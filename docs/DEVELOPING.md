@@ -91,6 +91,17 @@ sequenceDiagram
   outliner and properties), and every tick reads it back (`Controls.follow_selection`), so a
   selection made in Blender's UI is the gestures' and the panel's too; a changed selection reposts
   the panel at once.
+- **Selection outline:** the device draws the outline from the backend's `channel.instanceId`
+  (`qar.selection`, documented with the device in QAROS). Every instance the mirror creates carries
+  its object's ANARI `id` (`SceneMirror.object_id`: 1, 2, ... in the order objects first appear,
+  kept for the session). `Streamer.follow_selection` runs after every depsgraph update (a selection
+  change is one) and hands a changed selection to the sync worker, which outlines it after the
+  snapshots before it (`SceneMirror.select`).
+  - The selected object never sits in a merged chunk: a chunk's one instance has no single id. It
+    leaves its chunk when selected, the world is committed, and only then is `qar.selection` set;
+    deselected, it may merge again.
+  - One object: Blender's selected active one, as the gestures use. VisGL has no id channel, so
+    nothing is outlined there.
 - **Double tap** (`pointing.Taps`): QAROS reports no double tap for an app volume (the C API's tap
   count, `qar_gui_panel_gesture_get_tap_count`, is a GUI panel gesture's only). The add-on counts two
   clicks of one user's hand within `DOUBLE_TAP_SECONDS` (0.5 s), stamped when QAR's thread
@@ -182,6 +193,9 @@ python tools/run_tests.py --anari-folder <build>\qar-anari-device\bin --backend 
 - `test_blender_usd_scene.py` renders `tests/usd/usd_scene.usda` and checks each object by the colour
   where it lands, so a lost material, opacity, instance or light shows as a wrong pixel.
 - `test_blender_addon_sync.py SceneSyncTests.<method>` runs one material case.
+- `test_blender_selection_outline.py` (group `blender`) checks the outline's ids and `qar.selection`
+  against a stand-in device: the add-on's handlers and worker in Blender, and the chunk a selected
+  object leaves.
 
 ## Releasing
 

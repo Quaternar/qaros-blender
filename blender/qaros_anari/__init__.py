@@ -22,7 +22,7 @@ from .hub_launch import (
     started_by_hub,
     stdin_is_pipe,
 )
-from .controls import Controls
+from .controls import Controls, selected_name
 from .gestures import TOOL_IDS, TOOL_NAVIGATE, TOOLS
 from .protocol import panel_names, toggled_panel
 from .materials import material_descriptions
@@ -327,6 +327,7 @@ class Streamer:
         self.panel_error = None
         self.targets_parameter = None  # the qar.targets value last given to the device
         self.targets_cache = (0.0, None)  # (read at, SessionTargets or None)
+        self.selection = None  # the object the stream outlines (qar.selection), as last handed over
 
     @property
     def running(self):
@@ -417,6 +418,8 @@ class Streamer:
         # through the worker, so the UI thread never waits for a target's render.
         self.mirror.apply(self.capture.capture(context.evaluated_depsgraph_get(), (), True))
         self.worker = SyncWorker(self.mirror, lambda error: log(f"sync failed: {error!r}"))
+        self.selection = None
+        self.follow_selection()
         self.publish()
         add_handlers()
         bpy.app.timers.register(self.open_panel, first_interval=PANEL_POLL_INTERVAL)
@@ -576,6 +579,17 @@ class Streamer:
         self.scene_name = scene.name
         descriptions = material_descriptions(bpy.data.materials) if materials else None
         self.worker.submit(self.capture.capture(depsgraph, dirty, full, descriptions))
+        self.follow_selection()
+
+    def follow_selection(self):
+        """Outlines Blender's selection in the stream, as Blender's viewport outlines it: the
+        selected active object, picked in the headset or in Blender's UI (controls.selected_name).
+        A selection change updates the depsgraph, so every change passes through sync()."""
+        name = selected_name()
+        if name == self.selection:
+            return
+        self.selection = name
+        self.worker.select(name)
 
     def resync(self):
         if self.running:
@@ -584,6 +598,7 @@ class Streamer:
             self.apply_targets(scene_targets(bpy.context.scene))
             depsgraph = bpy.context.evaluated_depsgraph_get()
             self.worker.submit(self.capture.capture(depsgraph, (), True, material_descriptions(bpy.data.materials)))
+            self.follow_selection()
 
     def on_status(self, severity, message):
         if severity in ("fatal", "error", "warning"):
