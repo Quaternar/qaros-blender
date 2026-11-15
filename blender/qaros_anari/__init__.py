@@ -54,8 +54,15 @@ def log(text):
     print(f"[qaros-anari] {text}", flush=True)
 
 
-# The Backend preference's "no backend named" value: qaros then chooses (QAR_ANARI_BACKEND unset).
+# The Backend preference's "no backend named" value: qaros then chooses (QAR_ANARI_BACKEND unset),
+# in the order the add-on gives it in QAR_ANARI_BACKEND_ORDER: VisGL first, for its physically based
+# materials without grain. A qaros older than that variable ignores it and starts with VisRTX.
 BACKEND_AUTOMATIC = "auto"
+AUTOMATIC_ORDER = "visgl,visrtx,ospray,helide"
+# The VisRTX materials preference: physically based (metal, highlights, grain in a moving view) or
+# matte (smooth).
+VISRTX_PHYSICAL = "physical"
+VISRTX_MATTE = "matte"
 
 
 class Preferences(bpy.types.AddonPreferences):
@@ -72,7 +79,7 @@ class Preferences(bpy.types.AddonPreferences):
         # Fixed numbers: Blender saves the number, so a saved choice keeps its backend when items
         # are added. An empty identifier would make Automatic a heading that cannot be chosen.
         items=(
-            (BACKEND_AUTOMATIC, "Automatic", "VisRTX, VisGL, OSPRay, then Helide", 0),
+            (BACKEND_AUTOMATIC, "Automatic", "VisGL, VisRTX, OSPRay, then Helide", 0),
             ("visrtx", "VisRTX", "NVIDIA RTX", 1),
             ("visgl", "VisGL", "OpenGL 4.3", 2),
             ("ospray", "OSPRay", "Intel, CPU path tracer", 4),
@@ -100,6 +107,16 @@ class Preferences(bpy.types.AddonPreferences):
     near: bpy.props.FloatProperty(name="Near", description="Depth range in Blender units", default=0.1, min=0.0001)
     far: bpy.props.FloatProperty(name="Far", description="Depth range in Blender units", default=100.0, min=0.01)
     ambient: bpy.props.FloatProperty(name="Ambient light", default=0.3, min=0.0, max=10.0)
+    visrtx_materials: bpy.props.EnumProperty(
+        name="VisRTX materials",
+        description="How VisRTX shades Blender materials. Read when streaming starts",
+        items=(
+            (VISRTX_MATTE, "Matte (smooth)", "Colour only: no grain, no metal or highlights", 0),
+            (VISRTX_PHYSICAL, "Physically based (metal, grain)",
+             "Metallic, roughness and emission, with grain on surfaces lit by the ambient light", 1),
+        ),
+        default=VISRTX_PHYSICAL,
+    )
     # What the controls panel in the headset shows (docs/DEVELOPING.md).
     show_object_tab: bpy.props.BoolProperty(name="Object", description="Location, rotation and scale tab", default=True)
     show_material_tab: bpy.props.BoolProperty(name="Material", description="Base colour, roughness and metallic tab", default=True)
@@ -124,6 +141,7 @@ class Preferences(bpy.types.AddonPreferences):
         row.prop(self, "near")
         row.prop(self, "far")
         layout.prop(self, "ambient")
+        layout.prop(self, "visrtx_materials")
         self.draw_controls_panel(layout.box())
 
     def draw_controls_panel(self, box):
@@ -278,9 +296,12 @@ class Streamer:
         prefs = preferences()
         self.error = None
         if Streamer.library is None:
+            import os
             if prefs.backend != BACKEND_AUTOMATIC:
-                import os
                 os.environ["QAR_ANARI_BACKEND"] = prefs.backend
+            else:
+                # An order set before Blender started (tests, a developer) is kept.
+                os.environ.setdefault("QAR_ANARI_BACKEND_ORDER", AUTOMATIC_ORDER)
             Streamer.library = anari.Library(prefs.anari_folder, LIBRARY_NAME, self.on_status)
         device = Streamer.library.new_device()
         # qar.* parameters are read when streaming starts; with no onboarding set, qaros joins the
@@ -302,8 +323,13 @@ class Streamer:
         self.backend = device.property_string("qar.backend")
         log(f"backend: {self.backend or 'unknown'}")
         # Objects outside the app volume are not rendered (qar.volumeCube, polled by the worker).
-        self.mirror = SceneMirror(device, self.backend, lambda: device.property_matrix("qar.volumeCube"))
+        self.mirror = SceneMirror(
+            device, self.backend, lambda: device.property_matrix("qar.volumeCube"),
+            visrtx_matte=prefs.visrtx_materials == VISRTX_MATTE,
+        )
         log(f"renderer: {self.mirror.renderer_subtype}")
+        log("world: streamed as an hdri light" if self.mirror.environment_support
+            else "world: not streamed (the renderer has no hdri light)")
         support = self.mirror.material_support
         log(support.status)
         if support.fallback_reason:

@@ -63,6 +63,15 @@ sequenceDiagram
   chunk and rejoins after 2 s still.
 - **Culling.** Objects entirely outside the app volume (`qar.volumeCube`) are left out.
 - **Lights** stream in the units Cycles renders them with; a scene without lights gets a sun.
+- **World** (`world.py`): the World's equirectangular Environment Texture or plain colour, with
+  strength and Mapping rotation, copied on the UI thread (pixels read once per image, averaged
+  down to 1024 columns) and sent as an `hdri` light with `visible` off, only when the device
+  advertises an hdri light with `radiance` and `visible` (`Device.environment_support`) and the
+  renderer is not OSPRay's SciVis. VisGL has none (`anariNewLight("hdri")` returns null there);
+  VisRTX 26.09 does not advertise `visible`, and with it off lights nothing and turns matte
+  surfaces to grain; SciVis ignores hdri lights.
+- **Backend order:** Automatic sets `QAR_ANARI_BACKEND_ORDER=visgl,visrtx,ospray,helide` before
+  the library loads (kept when already set); a qaros without that variable keeps its own order.
 - **Materials:** constant inputs of the active Principled BSDF (`materials.py`); the device's
   advertised capabilities decide what each backend gets.
 - **Controls panel** (`panel.py`, `controls.py`, `protocol.py`, `blender_panels.py`): the page is

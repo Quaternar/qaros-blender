@@ -119,9 +119,10 @@ class UsdSceneTests(unittest.TestCase):
             self.skipTest("backend lacks advertised alpha blending")
         r, g, b, a = self.colour((0.5, 0.3, 0.5))
         self.assertGreater(b - r, 20, f"glass not blue: {(r, g, b)}")
-        # Opaque, this blue lit from above saturates its blue channel (VisGL: 84, 108, 255); at
-        # opacity 0.4 the grey floor behind pulls it down (99, 108, 186).
-        self.assertLess(b, 225, f"glass streams opaque: {(r, g, b)}")
+        # Opaque, this blue lit from above saturates its blue channel (VisGL: 84, 108, 255; VisRTX
+        # physically based: 70, 99, 255); at opacity 0.4 the grey floor behind pulls it down
+        # (VisGL: 99, 108, 186; VisRTX physically based, with its highlight: 109, 120, 230).
+        self.assertLess(b, 245, f"glass streams opaque: {(r, g, b)}")
         self.assertEqual(a, 255)
 
     def test_point_instances_stream(self):
