@@ -8,11 +8,12 @@ import atexit
 import os
 import sys
 import threading
+import time
 
 import bpy
 from bpy.app.handlers import persistent
 
-from . import anari, blender_panels, usd_import
+from . import anari, blender_panels, targets, usd_import
 from .hub_launch import (
     AutoStartOnce,
     StopRequestWatcher,
@@ -48,6 +49,8 @@ STOP_POLL_INTERVAL = 0.1
 AUTO_START_DELAY = 0.5
 # How often Blender's thread looks whether the stream runs, to open the controls panel beside it.
 PANEL_POLL_INTERVAL = 0.5
+# How long the session's device list read from the device is reused by panel redraws.
+TARGETS_CACHE_SECONDS = 0.5
 
 
 def log(text):
@@ -219,6 +222,20 @@ def preferences():
     return SESSION_PREFERENCES
 
 
+def scene_targets(scene):
+    """The scene's Streams to choice (saved with the .blend; docs/user-guide.md)."""
+    return targets.TargetChoice.from_scene(
+        getattr(scene, "qaros_stream_to_all", True), getattr(scene, "qaros_stream_targets", "")
+    )
+
+
+def store_scene_targets(scene, choice):
+    scene.qaros_stream_to_all = choice.stream_to_all
+    text = choice.selected_text()
+    if scene.qaros_stream_targets != text:
+        scene.qaros_stream_targets = text
+
+
 class Streamer:
     """The one stream of this Blender process. The ANARI library is loaded once and kept: qaros
     keeps the QAR runtime loaded for the life of the process."""
@@ -242,6 +259,8 @@ class Streamer:
         self.panel = None  # the served controls panel beside the app volume
         self.controls = None  # applies what users change on the panel
         self.panel_error = None
+        self.targets_parameter = None  # the qar.targets value last given to the device
+        self.targets_cache = (0.0, None)  # (read at, SessionTargets or None)
 
     @property
     def running(self):
@@ -296,8 +315,13 @@ class Streamer:
         device.set(device.handle, "qar.volume", anari.STRING, self.volume.name)
         device.set(device.handle, "qar.volumeDisplayName", anari.STRING, self.volume.display_name)
         device.set(device.handle, "qar.volumeNumbering", anari.BOOL, 1 if self.volume.numbering else 0)
+        # Unset (the default) streams to every device; a QAROS without target choice never sees it.
+        self.targets_parameter = scene_targets(context.scene).parameter()
+        if self.targets_parameter is not None:
+            device.set(device.handle, "qar.targets", anari.STRING, self.targets_parameter)
         device.commit()
         self.device = device
+        self.targets_cache = (0.0, None)
         # Fixed for this Blender process: the preference is read only when the library loads.
         self.backend = device.property_string("qar.backend")
         log(f"backend: {self.backend or 'unknown'}")
@@ -323,6 +347,38 @@ class Streamer:
         add_handlers()
         bpy.app.timers.register(self.open_panel, first_interval=PANEL_POLL_INTERVAL)
         log(f"streaming '{self.scene_name}': {self.mirror.objects} objects, {self.mirror.triangles} triangles")
+
+    def apply_targets(self, choice):
+        """Hands a changed Streams to choice to the running device: its next commit stops the
+        devices no longer chosen and starts the newly chosen ones."""
+        if not self.running or self.stopping:
+            return
+        parameter = choice.parameter()
+        if parameter == self.targets_parameter:
+            return
+        if parameter is None:
+            self.device.unset(self.device.handle, "qar.targets")
+            log("streaming to every device")
+        else:
+            self.device.set(self.device.handle, "qar.targets", anari.STRING, parameter)
+            log(f"streaming to {len(choice.selected)} selected device(s)")
+        self.device.commit()
+        self.targets_parameter = parameter
+        self.targets_cache = (0.0, None)
+
+    def session_targets(self):
+        """The session's devices as the device reports them, or None (not streaming yet, or a
+        QAROS without target choice). Read at most every TARGETS_CACHE_SECONDS: panels redraw on
+        every mouse move."""
+        if not self.running or self.stopping:
+            return None
+        read_at, cached = self.targets_cache
+        now = time.monotonic()
+        if now - read_at < TARGETS_CACHE_SECONDS:
+            return cached
+        cached = targets.parse_session_targets(self.device.property_string("qar.sessionTargets"))
+        self.targets_cache = (now, cached)
+        return cached
 
     def publish(self):
         """qaros streams the world and renderer of the application's last rendered frame, and
@@ -440,6 +496,8 @@ class Streamer:
             elif isinstance(datablock, (bpy.types.Mesh, bpy.types.Curve, bpy.types.MetaBall)):
                 data = datablock.original
                 dirty.update(obj.name for obj in bpy.data.objects if obj.data == data)
+        if scene.name != self.scene_name:
+            self.apply_targets(scene_targets(scene))
         full = scene.name != self.scene_name or self.worker.take_failure()
         self.scene_name = scene.name
         descriptions = material_descriptions(bpy.data.materials) if materials else None
@@ -448,6 +506,8 @@ class Streamer:
     def resync(self):
         if self.running:
             self.scene_name = bpy.context.scene.name
+            # A loaded .blend or an undo brings its own Streams to choice.
+            self.apply_targets(scene_targets(bpy.context.scene))
             depsgraph = bpy.context.evaluated_depsgraph_get()
             self.worker.submit(self.capture.capture(depsgraph, (), True, material_descriptions(bpy.data.materials)))
 
@@ -556,6 +616,81 @@ class QAROS_OT_fit_volume(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class QAROS_OT_stream_to_all(bpy.types.Operator):
+    bl_idname = "qaros.stream_to_all"
+    bl_label = "All devices"
+    bl_description = (
+        "Stream to every QAROS device, also those that join later. Untick to choose devices: "
+        "every connected device stays ticked until you untick it"
+    )
+    bl_options = {"INTERNAL", "UNDO"}
+
+    on: bpy.props.BoolProperty()
+
+    def execute(self, context):
+        choice = targets.set_all(scene_targets(context.scene), self.on, STREAMER.session_targets())
+        store_scene_targets(context.scene, choice)
+        STREAMER.apply_targets(choice)
+        return {"FINISHED"}
+
+
+class QAROS_OT_stream_to_device(bpy.types.Operator):
+    bl_idname = "qaros.stream_to_device"
+    bl_label = "Stream to this device"
+    bl_description = "Stream to this QAROS device or stop streaming to it"
+    bl_options = {"INTERNAL", "UNDO"}
+
+    peer_id: bpy.props.StringProperty()
+    on: bpy.props.BoolProperty()
+
+    def execute(self, context):
+        choice = targets.set_target(
+            scene_targets(context.scene), self.peer_id, self.on, STREAMER.session_targets()
+        )
+        store_scene_targets(context.scene, choice)
+        STREAMER.apply_targets(choice)
+        return {"FINISHED"}
+
+
+def checkbox_icon(ticked):
+    return "CHECKBOX_HLT" if ticked else "CHECKBOX_DEHLT"
+
+
+def draw_streams_to(layout, scene):
+    """Streams to: All devices, or one checkbox per connected device and per chosen device that is
+    not connected. The list comes from the device once streaming runs."""
+    box = layout.box()
+    choice = scene_targets(scene)
+    session = STREAMER.session_targets()
+    box.label(text="Streams to")
+    if STREAMER.running and not STREAMER.stopping and session is None and STREAMER.volume_known():
+        # Streaming runs, but the device does not list its targets: an older QAROS.
+        box.label(text="Every device (this QAROS cannot choose devices)", icon="INFO")
+        return
+    button = box.operator(
+        QAROS_OT_stream_to_all.bl_idname, text="All devices", icon=checkbox_icon(choice.stream_to_all), emboss=False
+    )
+    button.on = not choice.stream_to_all
+    for row in targets.rows(choice, session):
+        line = box.row()
+        line.enabled = row.online or not choice.stream_to_all
+        button = line.operator(
+            QAROS_OT_stream_to_device.bl_idname, text=row.label, icon=checkbox_icon(row.ticked), emboss=False
+        )
+        button.peer_id = row.peer_id
+        button.on = not row.ticked
+        if row.streaming:
+            line.label(text="", icon="RADIOBUT_ON")
+    box.label(text=targets.summary(choice, session))
+    if session is None and STREAMER.running:
+        box.label(text="Devices are listed once streaming runs")
+    warning = targets.over_limit(choice, session, preferences().max_users)
+    if warning:
+        row = box.row()
+        row.alert = True
+        row.label(text=warning, icon="ERROR")
+
+
 class QAROS_PT_panel(bpy.types.Panel):
     bl_label = "QAROS"
     bl_space_type = "VIEW_3D"
@@ -612,13 +747,32 @@ class QAROS_PT_panel(bpy.types.Panel):
                 row.alert = True
                 row.label(text="No controls panel (see the console)", icon="ERROR")
             layout.operator(QAROS_OT_fit_volume.bl_idname, icon="FULLSCREEN_ENTER")
+            draw_streams_to(layout, context.scene)
             layout.operator(QAROS_OT_stop.bl_idname, icon="PAUSE")
         else:
+            draw_streams_to(layout, context.scene)
             layout.operator(QAROS_OT_start.bl_idname, icon="PLAY")
 
 
+def remember_target_names():
+    """Keeps the names of the chosen devices in the scene, so one that leaves is still listed by
+    name. Written from a timer: a panel's draw may not change data."""
+    scene = bpy.context.scene
+    if scene is None or not STREAMER.running:
+        return
+    choice = scene_targets(scene)
+    named = targets.remember_names(choice, STREAMER.session_targets())
+    if named is not choice:
+        store_scene_targets(scene, named)
+
+
 def redraw_panels():
-    """The status changes off the UI thread (joining, users connecting)."""
+    """The status changes off the UI thread (joining, users connecting, devices coming and
+    going)."""
+    try:
+        remember_target_names()
+    except Exception as error:  # noqa: BLE001 - only the names of absent devices are missing
+        log(f"remembering device names failed: {error!r}")
     for window in bpy.context.window_manager.windows:
         for area in window.screen.areas:
             if area.type == "VIEW_3D":
@@ -626,7 +780,17 @@ def redraw_panels():
     return 1.0
 
 
-CLASSES = (Preferences, QAROS_OT_toggle_controls_panel, QAROS_OT_reset_controls_panels, QAROS_OT_start, QAROS_OT_stop, QAROS_OT_fit_volume, QAROS_PT_panel)
+CLASSES = (
+    Preferences,
+    QAROS_OT_toggle_controls_panel,
+    QAROS_OT_reset_controls_panels,
+    QAROS_OT_start,
+    QAROS_OT_stop,
+    QAROS_OT_fit_volume,
+    QAROS_OT_stream_to_all,
+    QAROS_OT_stream_to_device,
+    QAROS_PT_panel,
+)
 
 
 def stop_at_exit():
@@ -703,6 +867,14 @@ def register():
         "when another Blender on this PC shows it. A name: that volume only",
         default="",
     )
+    # Streams to, saved with the .blend: every device (the default, also in a Blender QAROS started
+    # with no file), or the devices in qaros_stream_targets (JSON: peer id -> last seen name).
+    bpy.types.Scene.qaros_stream_to_all = bpy.props.BoolProperty(
+        name="All devices", description="Stream to every QAROS device", default=True
+    )
+    bpy.types.Scene.qaros_stream_targets = bpy.props.StringProperty(
+        name="Devices", description="QAROS devices this scene streams to", default="", options={"HIDDEN"}
+    )
     bpy.app.timers.register(redraw_panels, first_interval=1.0, persistent=True)
     atexit.register(stop_at_exit)
     watch_for_hub_stop()
@@ -718,6 +890,8 @@ def unregister():
         bpy.app.timers.unregister(quit_when_hub_stops)
     if bpy.app.timers.is_registered(auto_start_streaming):
         bpy.app.timers.unregister(auto_start_streaming)
+    del bpy.types.Scene.qaros_stream_targets
+    del bpy.types.Scene.qaros_stream_to_all
     del bpy.types.Scene.qaros_volume_name
     usd_import.unregister()
     for cls in reversed(CLASSES):

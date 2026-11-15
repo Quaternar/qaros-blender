@@ -8,10 +8,11 @@ Groups (all by default; a group whose requirement is missing is skipped and repo
 
 | Group   | Needs                                   | Tests                                              |
 |---------|-----------------------------------------|----------------------------------------------------|
-| unit    | Python 3.11+                            | protocol, panel, pointing, volume names, hub stop, |
+| unit    | Python 3.11+                            | protocol, panel, pointing, volume names, targets,  |
 |         |                                         | auto-start, ANARI folder lookup, release assets    |
 | blender | Blender                                 | panel replay, pointing in a scene, USD import,     |
-|         |                                         | add-on started by --addons alone, ZIP installed    |
+|         |                                         | add-on started by --addons alone, Streams to,      |
+|         |                                         | ZIP installed                                      |
 |         |                                         | from disk and started as the Blender tile does     |
 | device  | Blender and a qaros ANARI device folder | ctypes binding, scene sync, USD scene rendered     |
 
@@ -30,11 +31,12 @@ TIMEOUT_S = 120
 SKIPPED = 77
 
 UNIT = ["test_blender_helper.py", "test_blender_hub_launch.py", "test_blender_anari_folder.py",
-        "test_blender_volume_name.py",
+        "test_blender_volume_name.py", "test_blender_targets.py",
         "test_blender_panel.py", "test_blender_controls_protocol.py", "test_blender_pointing.py",
         "test_release_package.py"]
 BLENDER = ["test_blender_panel_replay.py", "test_blender_pointing_scene.py", "test_blender_usd_import.py",
-           "test_blender_addon_launch.py", "test_blender_splats.py"]
+           "test_blender_addon_launch.py", "test_blender_splats.py",
+           "test_blender_targets_scene.py"]
 # Plain Python driving Blender processes of its own (--blender).
 BLENDER_DRIVER = ["test_blender_addon_install.py"]
 DEVICE_PYTHON = ["test_blender_addon_binding.py"]

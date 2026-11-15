@@ -129,6 +129,30 @@ class BindingTests(unittest.TestCase):
         errors = [text for severity, text in self.messages if severity in ("fatal", "error")]
         self.assertEqual(errors, [])
 
+    def target_errors(self):
+        found = [text for severity, text in self.messages if severity == "error" and "qar.targets" in text]
+        self.messages[:] = [m for m in self.messages if "qar.targets" not in m[1]]
+        return found
+
+    def test_targets_takes_peer_ids_and_unset_and_reports_a_bad_id(self):
+        d = self.device
+        d.set(d.handle, "qar.targets", anari.STRING, "0123456789abcdef0123456789abcdef,fedcba98-7654-3210-fedc-ba9876543210")
+        d.commit()
+        d.set(d.handle, "qar.targets", anari.STRING, "")
+        d.commit()
+        d.unset(d.handle, "qar.targets")
+        d.commit()
+        self.assertEqual(self.target_errors(), [], "ids, an empty list and unset are taken")
+        d.set(d.handle, "qar.targets", anari.STRING, "receiver-1")
+        d.commit()
+        errors = self.target_errors()
+        self.assertEqual(len(errors), 1, "a malformed id is reported once")
+        self.assertIn("receiver-1", errors[0])
+
+    def test_session_targets_is_unanswered_until_streaming(self):
+        # Streaming is off here: no session, so no list (the add-on then shows only its saved choice).
+        self.assertIsNone(self.device.property_string("qar.sessionTargets"))
+
 
 class MetadataAPI:
     """Native-layout query results, including missing metadata and repeated parameter names."""

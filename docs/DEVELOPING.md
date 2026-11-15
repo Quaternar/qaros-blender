@@ -84,6 +84,15 @@ sequenceDiagram
   hover, never during their drag), and a drag in that mode moves the object only when its own
   hit, else the hand's latest hover, picks the selection (`Controls.aimed`). A pinch on a GUI panel
   or on empty space reaches the volume without a hit and moves nothing.
+- **Streams to** (`targets.py`): the device reports the session's target applications in
+  `qar.sessionTargets` (JSON) and streams to the peer ids in `qar.targets` (unset: every one). The
+  tab reads the list at most every 0.5 s (panels redraw on every mouse move), and the 1 s redraw
+  timer keeps the chosen devices' names in the scene, so one that leaves is still listed by name.
+  The choice is two Scene properties, `qaros_stream_to_all` and `qaros_stream_targets` (JSON peer id
+  -> name), so it is saved with the `.blend` like `qaros_volume_name`: a scene's audience goes with
+  the scene. A change commits the device at once; a loaded `.blend`, an undo or a scene switch
+  applies that scene's choice. `qar.targets` is set only for a selection, so an older device never
+  sees it.
 - **Stop from QAROS** (`hub_launch.py`): a QAROS launcher stops an app by closing its stdin, asking
   it to close and terminating it one second later. When QAROS started Blender (`QAR_INSTANCE` set,
   stdin a pipe), the add-on watches stdin and quits Blender at once; Blender writes `quit.blend`
