@@ -120,6 +120,24 @@ class BindingTests(unittest.TestCase):
             self.device.release(handle)
         print(f"Material capabilities: {support.subtype}; alpha modes: {sorted(support.alpha_modes)}")
 
+    def test_environment_light_through_the_proxy(self):
+        supported = self.device.environment_support()
+        self.assertEqual(supported and "hdri" in self.device.object_subtypes(anari.LIGHT), supported)
+        if not supported:
+            print(f"Environment light: none ({self.device.property_string('qar.backend')})")
+            return
+        light = self.device.new("Light", "hdri")
+        try:
+            radiance = self.device.array2d(anari.FLOAT32_VEC3, 4, 2, array.array("f", [1.0] * 24), 12)
+            self.device.set(light, "radiance", anari.ARRAY2D, radiance)
+            self.device.release(radiance)
+            self.device.set(light, "visible", anari.BOOL, 0)
+            self.device.commit(light)
+        finally:
+            self.device.release(light)
+        with self.assertRaises(anari.AnariError):
+            self.device.array2d(anari.FLOAT32_VEC3, 4, 2, array.array("f", [1.0] * 3), 12)
+
     def test_array_size_mismatch_is_rejected(self):
         with self.assertRaises(anari.AnariError):
             self.device.array(anari.FLOAT32_VEC3, 2, array.array("f", [0, 0, 0]), 12)
@@ -128,6 +146,30 @@ class BindingTests(unittest.TestCase):
         self.device.release(self.triangle_world())
         errors = [text for severity, text in self.messages if severity in ("fatal", "error")]
         self.assertEqual(errors, [])
+
+    def target_errors(self):
+        found = [text for severity, text in self.messages if severity == "error" and "qar.targets" in text]
+        self.messages[:] = [m for m in self.messages if "qar.targets" not in m[1]]
+        return found
+
+    def test_targets_takes_peer_ids_and_unset_and_reports_a_bad_id(self):
+        d = self.device
+        d.set(d.handle, "qar.targets", anari.STRING, "0123456789abcdef0123456789abcdef,fedcba98-7654-3210-fedc-ba9876543210")
+        d.commit()
+        d.set(d.handle, "qar.targets", anari.STRING, "")
+        d.commit()
+        d.unset(d.handle, "qar.targets")
+        d.commit()
+        self.assertEqual(self.target_errors(), [], "ids, an empty list and unset are taken")
+        d.set(d.handle, "qar.targets", anari.STRING, "receiver-1")
+        d.commit()
+        errors = self.target_errors()
+        self.assertEqual(len(errors), 1, "a malformed id is reported once")
+        self.assertIn("receiver-1", errors[0])
+
+    def test_session_targets_is_unanswered_until_streaming(self):
+        # Streaming is off here: no session, so no list (the add-on then shows only its saved choice).
+        self.assertIsNone(self.device.property_string("qar.sessionTargets"))
 
 
 class MetadataAPI:
@@ -232,6 +274,26 @@ class MaterialSupportTests(unittest.TestCase):
         api.subtypes = None
         with self.assertRaisesRegex(anari.AnariError, "physicallyBased is not advertised"):
             anari.Device(api, 123).material_support()
+
+
+class EnvironmentSupportTests(unittest.TestCase):
+    """The World is streamed only to an hdri light advertising radiance and visible: an environment
+    the camera does not see."""
+
+    def support(self, lights):
+        return anari.Device(MetadataAPI(lights), 123).environment_support()
+
+    def test_an_hdri_light_with_radiance_and_visible(self):
+        self.assertTrue(self.support({
+            "point": [("intensity", anari.FLOAT32)],
+            "hdri": [("radiance", anari.ARRAY2D), ("visible", anari.BOOL), ("scale", anari.FLOAT32)],
+        }))
+
+    def test_no_hdri_light_or_one_that_cannot_hide(self):
+        self.assertFalse(self.support({"directional": [("irradiance", anari.FLOAT32)]}))
+        # VisRTX 26.09: reads visible without advertising it, and lights nothing with it off.
+        self.assertFalse(self.support({"hdri": [("radiance", anari.ARRAY2D), ("scale", anari.FLOAT32)]}))
+        self.assertFalse(self.support({"hdri": [("radiance", anari.ARRAY1D), ("visible", anari.BOOL)]}))
 
 
 if __name__ == "__main__":

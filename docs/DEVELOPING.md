@@ -63,6 +63,15 @@ sequenceDiagram
   chunk and rejoins after 2 s still.
 - **Culling.** Objects entirely outside the app volume (`qar.volumeCube`) are left out.
 - **Lights** stream in the units Cycles renders them with; a scene without lights gets a sun.
+- **World** (`world.py`): the World's equirectangular Environment Texture or plain colour, with
+  strength and Mapping rotation, copied on the UI thread (pixels read once per image, averaged
+  down to 1024 columns) and sent as an `hdri` light with `visible` off, only when the device
+  advertises an hdri light with `radiance` and `visible` (`Device.environment_support`) and the
+  renderer is not OSPRay's SciVis. VisGL has none (`anariNewLight("hdri")` returns null there);
+  VisRTX 26.09 does not advertise `visible`, and with it off lights nothing and turns matte
+  surfaces to grain; SciVis ignores hdri lights.
+- **Backend order:** Automatic sets `QAR_ANARI_BACKEND_ORDER=visgl,visrtx,ospray,helide` before
+  the library loads (kept when already set); a qaros without that variable keeps its own order.
 - **Materials:** constant inputs of the active Principled BSDF (`materials.py`); the device's
   advertised capabilities decide what each backend gets.
 - **Controls panel** (`panel.py`, `controls.py`, `protocol.py`, `blender_panels.py`): the page is
@@ -72,10 +81,27 @@ sequenceDiagram
   crashed, or the hub restarted under it) is taken over by `get_or_create`, which keeps its place
   and points it at this run's bundle; a runtime from before that rule leaves such a panel on the
   earlier run's bundle, shown as "Page not available".
-- **Pointing** (`pointing.py`): a click selects by Blender's ray cast and switches that user's
-  one-hand drag to the object. The ray cast reports a collection instance as its prototype; the
-  pick maps it to the instancing object through the depsgraph's instances (matched by matrix), so
-  a drag never moves the prototype inside every instance.
+- **Pointing** (`pointing.py`): a click selects by Blender's ray cast. The ray cast reports a
+  collection instance as its prototype; the pick maps it to the instancing object through the
+  depsgraph's instances (matched by matrix), so a drag never moves the prototype inside every
+  instance.
+- **View, not model:** the app pose and app scale (gestures, the Visualizer's Content mode,
+  `qar.fitBox`) are a camera transform: the device renders each eye in app content space, so the
+  add-on never writes a Blender object for them. Only a one-hand drag that grabbed the user's
+  selection moves it: the user is in the object mode (one-hand drag reported, not mapped) only
+  while their latest hover picks their selection (`Controls.follow_hovers`, one ray cast per new
+  hover, never during their drag), and a drag in that mode moves the object only when its own
+  hit, else the hand's latest hover, picks the selection (`Controls.aimed`). A pinch on a GUI panel
+  or on empty space reaches the volume without a hit and moves nothing.
+- **Streams to** (`targets.py`): the device reports the session's target applications in
+  `qar.sessionTargets` (JSON) and streams to the peer ids in `qar.targets` (unset: every one). The
+  tab reads the list at most every 0.5 s (panels redraw on every mouse move), and the 1 s redraw
+  timer keeps the chosen devices' names in the scene, so one that leaves is still listed by name.
+  The choice is two Scene properties, `qaros_stream_to_all` and `qaros_stream_targets` (JSON peer id
+  -> name), so it is saved with the `.blend` like `qaros_volume_name`: a scene's audience goes with
+  the scene. A change commits the device at once; a loaded `.blend`, an undo or a scene switch
+  applies that scene's choice. `qar.targets` is set only for a selection, so an older device never
+  sees it.
 - **Stop from QAROS** (`hub_launch.py`): a QAROS launcher stops an app by closing its stdin, asking
   it to close and terminating it one second later. When QAROS started Blender (`QAR_INSTANCE` set,
   stdin a pipe), the add-on watches stdin and quits Blender at once; Blender writes `quit.blend`

@@ -219,6 +219,8 @@ class Controls:
         self.hovers = {}  # (peer, hand) -> (monotonic time, action point): written on QAR's thread
         self.hovers_lock = threading.Lock()
         self.pointing = pointing.Pointing()
+        self.modes = {}  # peer -> the gesture mode last switched to ('object' or 'default')
+        self.hovers_followed = {}  # peer -> time of the hover its mode was last decided by
         panel.subscribe(self.receive)
         bpy.app.timers.register(self.tick, first_interval=TICK)
 
@@ -270,6 +272,7 @@ class Controls:
             final = final or edit.final
         if final:
             push_undo()
+        self.follow_hovers()
         for item in others:
             if isinstance(item, tuple) and item[0] == "gesture":
                 if self.gesture(item[1]):
@@ -290,14 +293,17 @@ class Controls:
         if kind == pointing.CLICK and phase in (pointing.INSTANT, pointing.ENDED):
             self.click(peer, event)
             return False
-        # A drag in the default mode moves the whole app: the mixer already did it.
+        # A drag in the default mode moves the view (the app transform): the mixer already did it,
+        # and Blender's scene stays as it is.
         if kind != pointing.ONE_HAND or event["mode"] != OBJECT_MODE:
             return False
         key = event["gesture_id"]
         if phase == pointing.STARTED:
             obj = bpy.data.objects.get(self.pointing.selected.get(peer, ""))
             if obj is not None:
-                self.pointing.drag_started(peer, key, tuple(obj.matrix_world.translation))
+                grabbed = self.aimed(peer, event)
+                if self.pointing.drag_started(peer, key, tuple(obj.matrix_world.translation), grabbed) is None:
+                    log(f"drag by {peer[:8]} grabbed {grabbed or 'nothing'}, not {obj.name}: nothing moves")
             return False
         if phase == pointing.UPDATED:
             moved = self.pointing.drag_moved(peer, key, self.content_delta(event["translation"]))
@@ -331,6 +337,31 @@ class Controls:
             return None
         return pointing.closest_hover(kept, start, time.monotonic())
 
+    def aimed(self, peer, event):
+        """What a click or a drag's pinch aimed at, by Blender's ray cast: its own hit, else the same
+        hand's latest hover. None when nothing."""
+        hover = self.recent_hover(peer, event.get("hand"), event.get("start"))
+        ray = pointing.click_ray(event, hover)
+        return pick(*ray) if ray is not None else None
+
+    def follow_hovers(self):
+        """Each user with a selection is in the object mode only while their latest hover is on it:
+        a one-hand drag then moves the object, anywhere else it moves the view. A user moving an
+        object keeps the mode until the drag ends (a running gesture keeps its mode anyway)."""
+        latest = {}
+        for (peer, _hand), kept in self.hovers_snapshot():
+            if kept and (peer not in latest or kept[-1][0] > latest[peer][0]):
+                latest[peer] = kept[-1]
+        for peer, (seen, (start, action)) in latest.items():
+            if peer not in self.pointing.selected or self.pointing.dragging(peer):
+                continue
+            if self.hovers_followed.get(peer) == seen:
+                continue
+            self.hovers_followed[peer] = seen
+            ray = pointing.click_ray({"start": start, "action": action})
+            aimed = pick(*ray) if ray is not None else None
+            self.set_mode(peer, self.pointing.wanted_mode(peer, aimed))
+
     def click(self, peer, event):
         hover = self.recent_hover(peer, event.get("hand"), event.get("start"))
         ray = pointing.click_ray(event, hover)
@@ -345,6 +376,14 @@ class Controls:
         if name is not None:
             select_only(name)
         self.set_mode(peer, mode)
+        # The click decided the mode: only a hover after it moves the ray off the selection.
+        latest = [kept[-1][0] for (who, _hand), kept in self.hovers_snapshot() if who == peer and kept]
+        if latest:
+            self.hovers_followed[peer] = max(latest)
+
+    def hovers_snapshot(self):
+        with self.hovers_lock:
+            return [(key, list(kept)) for key, kept in self.hovers.items()]
 
     def move(self, name, translation):
         obj = bpy.data.objects.get(name)
@@ -355,7 +394,7 @@ class Controls:
         obj.matrix_world.translation = Vector(translation)
 
     def set_mode(self, peer, mode):
-        if self.gestures is None:
+        if self.gestures is None or self.modes.get(peer) == mode:
             return
         try:
             if mode == "object":
@@ -364,6 +403,8 @@ class Controls:
                 self.gestures.select_default_mode(peer)
         except QarError as error:
             log(f"gesture mode for {peer[:8]} not changed: {error}")
+            return
+        self.modes[peer] = mode
 
     def apply_prop(self, edit):
         field = self.exposed.get(edit.id)

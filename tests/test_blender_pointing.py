@@ -106,7 +106,7 @@ class PointingTests(unittest.TestCase):
 
     def test_a_drag_moves_the_object_by_its_content_delta_in_blender_axes(self):
         self.state.clicked("a", "Cube")
-        self.assertEqual(self.state.drag_started("a", 7, (1.0, 2.0, 3.0)), "Cube")
+        self.assertEqual(self.state.drag_started("a", 7, (1.0, 2.0, 3.0), "Cube"), "Cube")
         # The grabbed point moved 0.5 up (content +Y) and 0.25 towards the viewer (content +Z).
         name, target = self.state.drag_moved("a", 7, (0.0, 0.5, 0.25))
         self.assertEqual(name, "Cube")
@@ -115,14 +115,14 @@ class PointingTests(unittest.TestCase):
 
     def test_a_canceled_drag_puts_the_object_back(self):
         self.state.clicked("a", "Cube")
-        self.state.drag_started("a", 1, (1.0, 2.0, 3.0))
+        self.state.drag_started("a", 1, (1.0, 2.0, 3.0), "Cube")
         self.state.drag_moved("a", 1, (1.0, 0.0, 0.0))
         self.assertEqual(self.state.drag_finished("a", 1, canceled=True), ("Cube", (1.0, 2.0, 3.0), True))
 
     def test_a_drag_without_a_selection_or_delta_does_nothing(self):
-        self.assertIsNone(self.state.drag_started("a", 1, (0.0, 0.0, 0.0)))
+        self.assertIsNone(self.state.drag_started("a", 1, (0.0, 0.0, 0.0), "Cube"))
         self.state.clicked("a", "Cube")
-        self.state.drag_started("a", 1, (0.0, 0.0, 0.0))
+        self.state.drag_started("a", 1, (0.0, 0.0, 0.0), "Cube")
         self.assertIsNone(self.state.drag_moved("a", 1, None))
         self.assertIsNone(self.state.drag_moved("a", 2, (0.0, 0.0, 0.0)))
         self.assertIsNone(self.state.drag_finished("a", 2, canceled=False))
@@ -130,8 +130,8 @@ class PointingTests(unittest.TestCase):
     def test_drags_are_kept_per_user_and_gesture(self):
         self.state.clicked("a", "Cube")
         self.state.clicked("b", "Cube")
-        self.state.drag_started("a", 1, (0.0, 0.0, 0.0))
-        self.state.drag_started("b", 1, (0.0, 0.0, 0.0))
+        self.state.drag_started("a", 1, (0.0, 0.0, 0.0), "Cube")
+        self.state.drag_started("b", 1, (0.0, 0.0, 0.0), "Cube")
         _, target = self.state.drag_moved("b", 1, (1.0, 0.0, 0.0))
         self.assertTrue(close(target, (1.0, 0.0, 0.0)))
         self.assertIn(("a", 1), self.state.drags)
@@ -139,10 +139,41 @@ class PointingTests(unittest.TestCase):
     def test_a_gone_object_is_nobodys_selection(self):
         self.state.clicked("a", "Cube")
         self.state.clicked("b", "Light")
-        self.state.drag_started("a", 1, (0.0, 0.0, 0.0))
+        self.state.drag_started("a", 1, (0.0, 0.0, 0.0), "Cube")
         self.assertEqual(self.state.forget_object("Cube"), ["a"])
         self.assertEqual(self.state.selected, {"b": "Light"})
         self.assertEqual(self.state.drags, {})
+
+
+class ViewNotModelTests(unittest.TestCase):
+    """Moving the volume's content is a view change; only grabbing the selection edits Blender."""
+
+    def setUp(self):
+        self.state = pointing.Pointing()
+        self.state.clicked("a", "Cube")
+
+    def test_a_drag_that_grabbed_nothing_moves_no_object(self):
+        # A pinch on a GUI panel's title bar or on empty space reaches the volume with no hit.
+        self.assertIsNone(self.state.drag_started("a", 1, (0.0, 0.0, 0.0), None))
+        self.assertIsNone(self.state.drag_moved("a", 1, (1.0, 0.0, 0.0)))
+        self.assertIsNone(self.state.drag_finished("a", 1, canceled=False))
+        self.assertFalse(self.state.dragging("a"))
+
+    def test_a_drag_that_grabbed_another_object_moves_no_object(self):
+        self.assertIsNone(self.state.drag_started("a", 1, (0.0, 0.0, 0.0), "Stand"))
+        self.assertEqual(self.state.drags, {})
+
+    def test_the_object_mode_holds_only_while_the_ray_is_on_the_selection(self):
+        self.assertEqual(self.state.wanted_mode("a", "Cube"), "object")
+        self.assertEqual(self.state.wanted_mode("a", "Stand"), "default")
+        self.assertEqual(self.state.wanted_mode("a", None), "default")
+        self.assertEqual(self.state.wanted_mode("b", "Cube"), "default", "b selected nothing")
+
+    def test_a_running_drag_is_its_users_only(self):
+        self.state.clicked("b", "Cube")
+        self.state.drag_started("a", 3, (0.0, 0.0, 0.0), "Cube")
+        self.assertTrue(self.state.dragging("a"))
+        self.assertFalse(self.state.dragging("b"))
 
 
 class ObjectModeTests(unittest.TestCase):

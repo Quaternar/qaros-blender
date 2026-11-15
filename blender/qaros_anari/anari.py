@@ -12,6 +12,7 @@ BOOL = 103
 STRING_LIST = 150
 PARAMETER_LIST = 152
 ARRAY1D = 504
+ARRAY2D = 505
 CAMERA = 507
 FRAME = 508
 GEOMETRY = 509
@@ -53,6 +54,10 @@ _SIGNATURES = {
     "anariNewDevice": (_handle, [_handle, ctypes.c_char_p]),
     "anariNewArray1D": (
         _handle, [_handle, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_uint64]
+    ),
+    "anariNewArray2D": (
+        _handle,
+        [_handle, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_uint64, ctypes.c_uint64],
     ),
     "anariNewObject": (_handle, [_handle, ctypes.c_char_p, ctypes.c_char_p]),
     "anariNewWorld": (_handle, [_handle]),
@@ -288,6 +293,17 @@ class Device:
             return preferred
         raise AnariError("No usable ANARI material: " + "; ".join(rejected))
 
+    def environment_support(self):
+        """Whether the backend can light the scene with an environment image it does not draw: an
+        `hdri` light advertising `radiance` and `visible` (OSPRay). VisGL has no hdri light;
+        VisRTX 26.09 reads `visible` without advertising it, and an hdri light with `visible` off
+        lights nothing there and turns matte surfaces into grain. Queried once, like
+        material_support."""
+        if "hdri" not in self.object_subtypes(LIGHT):
+            return False
+        parameters = self.object_parameters(LIGHT, "hdri")
+        return ("radiance", ARRAY2D) in parameters and ("visible", BOOL) in parameters
+
     def new(self, kind, subtype=None):
         constructor = getattr(self.api, f"anariNew{kind}")
         handle = constructor(self.handle, subtype.encode()) if subtype is not None else constructor(self.handle)
@@ -301,6 +317,16 @@ class Device:
         array = self.api.anariNewArray1D(self.handle, None, None, None, data_type, count)
         if not array:
             raise AnariError("anariNewArray1D failed")
+        return self._fill(array, count, data, item_bytes)
+
+    def array2d(self, data_type, width, height, data, item_bytes):
+        """A device-owned 2D array of `width` x `height` items, rows first, copied from `data`."""
+        array = self.api.anariNewArray2D(self.handle, None, None, None, data_type, width, height)
+        if not array:
+            raise AnariError("anariNewArray2D failed")
+        return self._fill(array, width * height, data, item_bytes)
+
+    def _fill(self, array, count, data, item_bytes):
         if count:
             pointer = self.api.anariMapArray(self.handle, array)
             if not pointer:
@@ -323,7 +349,7 @@ class Device:
         if data_type == STRING:
             self.api.anariSetParameter(self.handle, obj, name, data_type, ctypes.c_char_p(value.encode()))
             return
-        if data_type in (ARRAY1D, CAMERA, GEOMETRY, GROUP, INSTANCE, LIGHT, MATERIAL, RENDERER, SURFACE, WORLD):
+        if data_type in (ARRAY1D, ARRAY2D, CAMERA, GEOMETRY, GROUP, INSTANCE, LIGHT, MATERIAL, RENDERER, SURFACE, WORLD):
             holder = ctypes.c_void_p(value)
         elif data_type in (BOOL, INT32, DATA_TYPE):
             holder = ctypes.c_int32(int(value))

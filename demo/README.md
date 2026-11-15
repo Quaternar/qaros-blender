@@ -110,12 +110,14 @@ streamed at once (add-on preference **Users**).
 | Walk around, lean in | headset | the engine stays put in the room; look through the open casing at the stages |
 | **Frame** tab → **Pause** | panel | the turntable stops (do this before pulling sections out) |
 | Point at a section (the fan at the front, the exhaust at the back), click | headset or Visualizer | it is selected in Blender too; the panel shows its name |
-| One-hand drag after the click | headset or Visualizer | pulls that section out of the engine: an exploded view by hand |
+| One-hand drag on the selected section | headset or Visualizer | pulls that section out of the engine: an exploded view by hand |
+| One-hand drag beside it | headset or Visualizer | moves the view of the whole engine; Blender's scene is not changed |
 | **Object** tab → Location, Rotation | panel | moves or turns the selected section precisely |
 | **Material** tab | panel | changes the colour, roughness or metallic of the selected section's material |
 | **Undo** / **Redo** | panel, top right | puts sections back, step by step |
-| Click empty space | headset | the one-hand drag moves the whole engine again |
-| Two-hand pinch and pull | headset | scales and turns the whole engine |
+| Click empty space | headset | clears the selection |
+| Two-hand pinch and pull | headset | scales and turns the view of the whole engine |
+| Drag the **Blender** panel by its title bar | headset or Visualizer | the panel moves on its own; the engine stays |
 | Edit in Blender: recolour a material, add a **Boolean** cut-away, move a section | Blender | the change shows in the room within a moment |
 
 The sections are **Fan**, **Compressor**, **Combustion chamber**, **Turbine**, **Exhaust** and

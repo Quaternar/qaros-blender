@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Mirrors Blender's evaluated scene into one ANARI world, independent of any viewport or render
 engine. Meshes become one triangle geometry per material slot, shared by every instance of the same
-object; lights map to ANARI lights; transforms change from Blender's Z-up to ANARI's Y-up.
+object; lights map to ANARI lights, the World to an `hdri` light where the backend has one;
+transforms change from Blender's Z-up to ANARI's Y-up.
 
 Two halves, so Blender's UI thread never waits for the qaros scene lock (a target holds it for its
 whole render and readback): SceneCapture reads the depsgraph into a Snapshot of plain arrays on the
@@ -23,6 +24,7 @@ from .materials import (
     material_export,
     material_key,
 )
+from .world import world_environment
 
 # Blender world (Z up, -Y forward) -> app volume (Y up, -Z forward): (x, y, z) -> (x, z, -y).
 Z_UP_TO_Y_UP = np.array(
@@ -283,9 +285,9 @@ STUDIO_LIGHT = ("directional", [
 
 class Snapshot:
     """What one sync changes, in plain data: `meshes` object name -> parts (None: no faces) for
-    every object rebuilt, `instances` (object name, column-major transform) and `lights` for the
-    whole scene, `materials` material key -> plain material description for new or changed materials. `full`
-    rebuilds every object."""
+    every object rebuilt, `instances` (object name, column-major transform), `lights` and
+    `environment` (world.Environment or None) for the whole scene, `materials` material key ->
+    plain material description for new or changed materials. `full` rebuilds every object."""
 
     def __init__(self, full):
         self.full = full
@@ -293,6 +295,7 @@ class Snapshot:
         self.materials = {}
         self.instances = []
         self.lights = []
+        self.environment = None
 
     def absorb(self, newer):
         """Keep the latest description per material. A newer full capture replaces older scene
@@ -306,7 +309,28 @@ class Snapshot:
             self.materials.update(newer.materials)
         self.instances = newer.instances
         self.lights = newer.lights
+        self.environment = newer.environment
         return self
+
+
+POINT_TYPES = {"POINTCLOUD", "GAUSSIAN_SPLAT"}
+SPLAT_ATTRIBUTES = ("f_dc_0", "opacity", "scale_0", "rot_0")
+
+
+def unstreamed_reason(evaluated):
+    """Why the stream leaves `evaluated` out although it is visible, or None when it is drawn: a
+    point cloud or Gaussian splat object, or a mesh with vertices but no faces (a 3DGS PLY imported
+    as loose vertices). Text for the status list and the log."""
+    name = evaluated.original.name
+    if evaluated.type in POINT_TYPES:
+        return f"'{name}': Gaussian splats and point clouds are not streamed"
+    if evaluated.type == "MESH":
+        mesh = evaluated.data
+        if len(mesh.vertices) and not len(mesh.polygons):
+            if all(attribute in mesh.attributes for attribute in SPLAT_ATTRIBUTES):
+                return f"'{name}': Gaussian splats and point clouds are not streamed"
+            return f"'{name}': has no faces: not streamed"
+    return None
 
 
 def scene_bounds(depsgraph):
@@ -319,6 +343,8 @@ def scene_bounds(depsgraph):
         if evaluated.type not in GEOMETRY_TYPES:
             continue
         if not instance.is_instance and not evaluated.original.visible_get():
+            continue
+        if unstreamed_reason(evaluated) is not None:
             continue
         local = np.array([tuple(corner) + (1.0,) for corner in evaluated.bound_box], dtype=np.float32)
         world = Z_UP_TO_Y_UP @ np.array(instance.matrix_world, dtype=np.float32)
@@ -337,7 +363,13 @@ class SceneCapture:
         self.meshes = {}
         self.materials = {}
         self.diagnostics = MaterialDiagnostics(on_warning)
+        self.on_warning = on_warning
+        self.unstreamed = {}  # object name -> reason, for the objects now in the scene
+        self.reported_unstreamed = set()
         self.material_support = material_support
+        self.on_warning = on_warning
+        self.environment_pixels = {}  # the World image's source -> its pixels, read once
+        self.world_reported = set()  # World warnings already logged
 
     def capture(self, depsgraph, dirty_objects, full, materials=None):
         """`dirty_objects`: names whose evaluated geometry may have changed. `materials`: plain
@@ -349,10 +381,19 @@ class SceneCapture:
             self.materials.clear()
         extracted = set()
         seen = set()
+        unstreamed = {}
         for instance in depsgraph.object_instances:
             evaluated = instance.object
             original = evaluated.original
             if not instance.is_instance and not original.visible_get():
+                continue
+            reason = unstreamed_reason(evaluated)
+            if reason is not None:
+                unstreamed[original.name] = reason
+                if original.name not in self.reported_unstreamed:
+                    self.reported_unstreamed.add(original.name)
+                    if self.on_warning is not None:
+                        self.on_warning(reason)
                 continue
             if evaluated.type in GEOMETRY_TYPES:
                 name = original.name
@@ -368,7 +409,9 @@ class SceneCapture:
                 light = light_parameters(evaluated.data, instance.matrix_world)
                 if light is not None:
                     snapshot.lights.append(light)
+        self.unstreamed = unstreamed
         self.meshes = {name: parts for name, parts in self.meshes.items() if name in seen}
+        snapshot.environment = self.capture_environment(depsgraph.scene)
         descriptions = snapshot.materials
         snapshot.materials = {
             key: description for key, description in descriptions.items()
@@ -378,6 +421,16 @@ class SceneCapture:
         used_keys = {part[3] for parts in self.meshes.values() if parts for part in parts}
         self.diagnostics.update(self.materials, used_keys, self.material_support)
         return snapshot
+
+    def capture_environment(self, scene):
+        """The scene's World as a plain environment; each reason it is approximated is logged once."""
+        environment = world_environment(getattr(scene, "world", None), self.environment_pixels)
+        for reason in environment.warnings if environment is not None else ():
+            if reason not in self.world_reported:
+                self.world_reported.add(reason)
+                if self.on_warning is not None:
+                    self.on_warning(f"World: {reason}")
+        return environment
 
 
 # A rasterizing backend (VisGL) pays a fixed cost per surface, per eye, per user: about 6 us on an
@@ -412,12 +465,12 @@ class Chunk:
 
 SCIVIS_MATTE_ONLY = "OSPRay streams with its SciVis renderer, which shades matte materials only"
 VISRTX_MATTE_ONLY = (
-    "VisRTX samples the ambient light at random on physically based materials, which a moving view "
-    "shows as grain; matte materials take it as a constant"
+    "VisRTX materials preference is Matte: physically based materials sample the ambient light at "
+    "random, which a moving view shows as grain"
 )
 
 
-def streaming_renderer(backend):
+def streaming_renderer(backend, visrtx_matte=False):
     """The renderer subtype, its integer parameters and why the stream uses matte materials only
     (None: the backend's preferred model) for `backend`.
 
@@ -425,12 +478,13 @@ def streaming_renderer(backend):
       frame it never converges, so every frame is grain. Its SciVis renderer without ambient
       occlusion is noise-free and several times faster, but shades only matte materials.
     - VisRTX shades a physically based material with one random sample of the ambient light per
-      pixel, ambient occlusion off or not: faces lit only by it showed grain in a headset. A matte
-      material takes the ambient light as a constant. Fill lights instead of the ambient light cast
-      shadows, so a dense scene stayed dark."""
+      pixel, ambient occlusion off or not: faces lit only by it show grain in a moving view. A
+      matte material takes the ambient light as a constant. The add-on's VisRTX materials
+      preference chooses: physically based (metal and highlights, with that grain; the default)
+      or matte (`visrtx_matte`, smooth)."""
     if backend == "ospray":
         return "scivis", {"aoSamples": 0}, SCIVIS_MATTE_ONLY
-    if backend == "visrtx":
+    if backend == "visrtx" and visrtx_matte:
         return "default", {}, VISRTX_MATTE_ONLY
     return "default", {}, None
 
@@ -449,17 +503,20 @@ class SceneMirror:
     """Owns every ANARI object it creates on `device` and the world the stream renders. Never
     touches bpy: it runs on the SyncWorker thread. `backend` is the one qaros forwards to."""
 
-    def __init__(self, device, backend=None, volume_cube=None):
+    def __init__(self, device, backend=None, volume_cube=None, visrtx_matte=False):
         self.device = device
         # Returns qar.volumeCube (16 floats, column-major) or None. None as the callable: no culling.
         self.volume_cube = volume_cube
         self.cube = None  # 4x4 row-major numpy matrix: scene point -> the app volume's unit cube
         self.bounds = {}  # object name -> (low, high) corners of its parts, object space
         self.culled = 0  # instances outside the volume in the last placement
-        subtype, self.renderer_parameters, matte_only = streaming_renderer(backend)
+        subtype, self.renderer_parameters, matte_only = streaming_renderer(backend, visrtx_matte)
         # Before publishing the first frame: no target can hold the backend gate yet. Later
         # material updates and panel redraws use this copied metadata, never query the backend.
         self.material_support = renderer_material_support(matte_only, device.material_support())
+        # The World becomes an hdri light only where one can light the scene: VisGL has no hdri
+        # light, and OSPRay's SciVis renderer ignores one.
+        self.environment_support = subtype != "scivis" and device.environment_support()
         self.world = device.new("World")
         self.renderer_subtype = subtype
         self.renderer = device.new("Renderer", subtype)
@@ -470,8 +527,11 @@ class SceneMirror:
         self.material_descriptions = {}  # material key -> latest plain description
         self.instances = []
         self.instance_slots = {}  # (object name, occurrence) -> (instance, group, transform)
-        self.lights = []
-        self.light_parameters = None  # the captured lights `lights` were built from
+        self.lights = []  # every light in the world: the lamps, then the environment
+        self.lamps = []  # lights built from `light_parameters`
+        self.light_parameters = None  # the captured lights `lamps` were built from
+        self.environment = None  # the hdri light, or None
+        self.environment_description = None  # the world.Environment it was built from
         self.parts = {}  # object name -> latest captured parts (None: no faces)
         self.chunks = []  # Chunk, each one surface of merged static objects
         self.batched = {}  # object name -> (chunk, transform baked into it)
@@ -718,7 +778,10 @@ class SceneMirror:
         self.captured = snapshot.instances
         changed = bool(snapshot.full or snapshot.meshes or snapshot.materials)
         changed |= self.place(snapshot.instances, now)
-        changed |= self.update_lights(snapshot.lights or [STUDIO_LIGHT])
+        environment = snapshot.environment if self.environment_support else None
+        # The studio light stands in for lamps only when nothing else lights the scene.
+        lamps = snapshot.lights or ([] if environment is not None else [STUDIO_LIGHT])
+        changed |= self.update_lights(lamps, environment)
         if changed:
             device.commit(self.world)
 
@@ -848,13 +911,43 @@ class SceneMirror:
         self.replace_list("instance", anari.INSTANCE, instances, "instances", keep=set(instances))
         return True
 
-    def update_lights(self, captured):
-        if captured == self.light_parameters:
+    def update_lights(self, captured, environment=None):
+        """The world's lamps from `captured` and its hdri light from `environment`. An environment
+        whose image is unchanged (a new strength or rotation) is updated in place, without sending
+        the image again."""
+        lamps_changed = captured != self.light_parameters
+        environment_changed = environment != self.environment_description
+        if not lamps_changed and not environment_changed:
             return False
-        lights = [self.build_light(light) for light in captured]
-        self.replace_list("light", anari.LIGHT, lights, "lights")
+        lamps = [self.build_light(light) for light in captured] if lamps_changed else self.lamps
+        if environment_changed:
+            self.update_environment(environment)
+        lights = lamps + ([self.environment] if self.environment is not None else [])
+        self.replace_list("light", anari.LIGHT, lights, "lights", keep=set(lights))
+        self.lamps = lamps
         self.light_parameters = captured
         return True
+
+    def update_environment(self, environment):
+        """Points self.environment at an hdri light for `environment` (None: no light). The
+        previous light is left for update_lights to release once the world no longer lists it."""
+        previous = self.environment_description
+        if environment is None:
+            self.environment = None
+        elif self.environment is None or previous is None or previous.source != environment.source:
+            self.environment = self.device.new("Light", "hdri")
+            rows, columns = environment.pixels.shape[:2]
+            radiance = self.device.array2d(anari.FLOAT32_VEC3, columns, rows, environment.pixels, 12)
+            self.device.set(self.environment, "radiance", anari.ARRAY2D, radiance)
+            self.device.release(radiance)
+            # Lights the scene without being drawn behind it: the stream's background stays clear.
+            self.device.set(self.environment, "visible", anari.BOOL, 0)
+        if environment is not None:
+            self.device.set(self.environment, "scale", anari.FLOAT32, environment.strength)
+            self.device.set(self.environment, "direction", anari.FLOAT32_VEC3, environment.direction)
+            self.device.set(self.environment, "up", anari.FLOAT32_VEC3, environment.up)
+            self.device.commit(self.environment)
+        self.environment_description = environment
 
     def replace_list(self, parameter, data_type, handles, attribute, keep=frozenset()):
         """Point the world at `handles`, releasing the previous ones except those in `keep`."""
@@ -879,6 +972,7 @@ class SceneMirror:
         for handle in self.instances + self.lights + list(self.materials.values()):
             device.release(handle)
         self.instances, self.lights, self.materials = [], [], {}
+        self.lamps, self.environment, self.environment_description = [], None, None
         self.instance_slots, self.light_parameters = {}, None
         self.material_models.clear()
         self.surface_materials.clear()

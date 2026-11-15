@@ -23,7 +23,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "blender"))
 import qaros_anari  # noqa: E402
-from qaros_anari import anari, materials, sync  # noqa: E402
+from qaros_anari import anari, materials, sync, world  # noqa: E402
 
 FOLDER = os.getcwd()
 
@@ -50,6 +50,15 @@ class BackendPreferenceTests(unittest.TestCase):
     def test_saved_numbers_stay_with_their_backend(self):
         numbers = {item[0]: item[3] for item in self.items}
         self.assertEqual(numbers, {"auto": 0, "visrtx": 1, "visgl": 2, "helide": 3, "ospray": 4})
+
+    def test_automatic_puts_visgl_first(self):
+        self.assertEqual(self.items[0][2], "VisGL, VisRTX, OSPRay, then Helide")
+        self.assertEqual(qaros_anari.AUTOMATIC_ORDER, "visgl,visrtx,ospray,helide")
+
+    def test_visrtx_materials_default_to_physically_based_with_fixed_numbers(self):
+        keywords = qaros_anari.Preferences.__annotations__["visrtx_materials"].keywords
+        self.assertEqual(keywords["default"], "physical")
+        self.assertEqual({item[0]: item[3] for item in keywords["items"]}, {"matte": 0, "physical": 1})
 
 
 class MaterialExtractionTests(unittest.TestCase):
@@ -175,14 +184,18 @@ class MaterialExtractionTests(unittest.TestCase):
 class MaterialDevice:
     """Records typed writes and ownership so replacement tests can catch stale surface bindings."""
 
-    def __init__(self, support):
+    def __init__(self, support, hdri=False):
         self.support = support
+        self.hdri = hdri
         self.objects = {}
         self.events = []
         self.fail_subtype = None
 
     def material_support(self):
         return self.support
+
+    def environment_support(self):
+        return self.hdri
 
     def new(self, kind, subtype=None):
         if kind == "Material" and subtype == self.fail_subtype:
@@ -194,6 +207,11 @@ class MaterialDevice:
 
     def array(self, _data_type, _count, _data=None, _item_bytes=None):
         return self.new("Array")
+
+    def array2d(self, _data_type, width, height, data, _item_bytes):
+        handle = self.new("Array2D")
+        self.objects[handle]["parameters"]["size"] = (width, height, len(memoryview(data).cast("B")))
+        return handle
 
     def set(self, handle, name, data_type, value):
         obj = self.objects[handle]
@@ -229,16 +247,17 @@ class MaterialDevice:
 
 
 class StreamingRendererTests(unittest.TestCase):
-    """OSPRay streams with SciVis without ambient occlusion and matte materials, VisRTX with its
-    default renderer and matte materials; VisGL and Helide keep physically based materials."""
+    """OSPRay streams with SciVis without ambient occlusion and matte materials; VisRTX keeps its
+    default renderer with physically based materials, or matte ones when its preference says so;
+    VisGL and Helide keep physically based materials."""
 
     def support(self):
         matte = anari.MaterialSupport("matte", [("color", anari.FLOAT32_VEC3)], ())
         return anari.MaterialSupport("physicallyBased", [("baseColor", anari.FLOAT32_VEC3)], (), matte=matte)
 
-    def mirror(self, backend):
-        device = MaterialDevice(self.support())
-        mirror = sync.SceneMirror(device, backend)
+    def mirror(self, backend, visrtx_matte=False, hdri=False):
+        device = MaterialDevice(self.support(), hdri)
+        mirror = sync.SceneMirror(device, backend, visrtx_matte=visrtx_matte)
         mirror.configure_renderer(0.3, (0.0, 0.0, 0.0, 0.0))
         self.addCleanup(mirror.close)
         renderer = device.objects[mirror.renderer]
@@ -252,12 +271,30 @@ class StreamingRendererTests(unittest.TestCase):
         self.assertEqual(mirror.material_support.fallback_reason, sync.SCIVIS_MATTE_ONLY)
         self.assertEqual(mirror.device.objects[mirror.material("Plain")]["subtype"], "matte")
 
-    def test_visrtx_keeps_its_renderer_but_streams_matte(self):
+    def test_visrtx_streams_physically_based_by_default(self):
         mirror, renderer = self.mirror("visrtx")
         self.assertEqual(renderer["subtype"], "default")
         self.assertEqual(renderer["parameters"]["ambientSamples"], 0)
+        self.assertEqual(mirror.material_support.subtype, "physicallyBased")
+        self.assertIsNone(mirror.material_support.fallback_reason)
+
+    def test_visrtx_streams_matte_when_its_preference_says_so(self):
+        mirror, renderer = self.mirror("visrtx", visrtx_matte=True)
+        self.assertEqual(renderer["subtype"], "default")
         self.assertEqual(mirror.material_support.subtype, "matte")
         self.assertEqual(mirror.material_support.fallback_reason, sync.VISRTX_MATTE_ONLY)
+
+    def test_the_visrtx_preference_leaves_other_backends_alone(self):
+        for backend in ("visgl", "helide"):
+            with self.subTest(backend=backend):
+                mirror, _renderer = self.mirror(backend, visrtx_matte=True)
+                self.assertEqual(mirror.material_support.subtype, "physicallyBased")
+
+    def test_the_world_is_streamed_only_where_an_hdri_light_can_light_it(self):
+        self.assertTrue(self.mirror("visrtx", hdri=True)[0].environment_support)
+        self.assertFalse(self.mirror("visgl", hdri=False)[0].environment_support)
+        # OSPRay has an hdri light, but its SciVis renderer ignores it.
+        self.assertFalse(self.mirror("ospray", hdri=True)[0].environment_support)
 
     def test_other_backends_keep_the_default_renderer_and_physically_based(self):
         for backend in ("visgl", "helide", None):
@@ -270,6 +307,198 @@ class StreamingRendererTests(unittest.TestCase):
     def test_matte_only_without_a_matte_model_keeps_what_the_backend_offers(self):
         support = anari.MaterialSupport("physicallyBased", [("baseColor", anari.FLOAT32_VEC3)], ())
         self.assertIs(sync.renderer_material_support(sync.SCIVIS_MATTE_ONLY, support), support)
+
+
+def environment_world(name, image=None, color=(0.2, 0.4, 0.6, 1.0), strength=1.0, rotation=None,
+                      vector_type="POINT"):
+    """A World: Background (strength) fed by `image` through an Environment Texture (and a Mapping
+    with `rotation`), or by the constant `color`."""
+    data = bpy.data.worlds.new(name)
+    data.use_nodes = True
+    tree = data.node_tree
+    background = next(node for node in tree.nodes if node.type == "BACKGROUND")
+    background.inputs["Strength"].default_value = strength
+    background.inputs["Color"].default_value = color
+    if image is not None:
+        texture = tree.nodes.new("ShaderNodeTexEnvironment")
+        texture.image = image
+        tree.links.new(texture.outputs["Color"], background.inputs["Color"])
+        if rotation is not None:
+            mapping = tree.nodes.new("ShaderNodeMapping")
+            mapping.vector_type = vector_type
+            mapping.inputs["Rotation"].default_value = rotation
+            coordinates = tree.nodes.new("ShaderNodeTexCoord")
+            tree.links.new(coordinates.outputs["Generated"], mapping.inputs["Vector"])
+            tree.links.new(mapping.outputs["Vector"], texture.inputs["Vector"])
+    return data
+
+
+def float_image(name, width, height, rgba):
+    image = bpy.data.images.new(name, width, height, float_buffer=True)
+    pixels = np.empty((height, width, 4), dtype=np.float32)
+    pixels[:, :] = rgba
+    image.pixels.foreach_set(pixels.ravel())
+    return image
+
+
+class WorldEnvironmentTests(unittest.TestCase):
+    """Blender's World as a plain environment: an equirectangular image with its strength and
+    rotation, or a plain colour; unsupported setups fall back to the World's viewport colour."""
+
+    def setUp(self):
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+
+    def test_no_world_black_world_and_zero_strength_send_nothing(self):
+        self.assertIsNone(world.world_environment(None))
+        self.assertIsNone(world.world_environment(environment_world("Black", color=(0, 0, 0, 1))))
+        self.assertIsNone(world.world_environment(environment_world("Off", strength=0.0)))
+
+    def test_a_plain_colour_is_a_uniform_environment(self):
+        environment = world.world_environment(environment_world("Plain", strength=2.0))
+        self.assertEqual(environment.strength, 2.0)
+        self.assertEqual(environment.pixels.shape, (2, 4, 3))
+        np.testing.assert_allclose(environment.pixels[0, 0], (0.2, 0.4, 0.6), atol=1e-6)
+        self.assertEqual(environment.direction, (1.0, 0.0, 0.0))
+        self.assertEqual(environment.up, (0.0, 1.0, 0.0))
+
+    def test_an_environment_image_keeps_its_pixels_rows_and_strength(self):
+        image = float_image("Sky", 8, 4, (0.5, 1.0, 2.0, 1.0))
+        image.pixels[0:4] = (9.0, 0.0, 0.0, 1.0)  # bottom-left pixel
+        cache = {}
+        environment = world.world_environment(environment_world("Image", image, strength=3.0), cache)
+        self.assertEqual(environment.pixels.shape, (4, 8, 3))
+        np.testing.assert_allclose(environment.pixels[0, 0], (9.0, 0.0, 0.0))
+        np.testing.assert_allclose(environment.pixels[3, 7], (0.5, 1.0, 2.0))
+        self.assertEqual(environment.strength, 3.0)
+        self.assertEqual(environment.warnings, ())
+        # Read once: a second capture of the same image reuses the pixels.
+        again = world.world_environment(bpy.data.worlds["Image"], cache)
+        self.assertIs(again.pixels, environment.pixels)
+        self.assertEqual(again, environment)
+
+    def test_a_mapping_rotation_turns_the_image(self):
+        image = float_image("Turned", 8, 4, (1.0, 1.0, 1.0, 1.0))
+        quarter = (0.0, 0.0, math.pi / 2)
+        environment = world.world_environment(environment_world("Point", image, rotation=quarter))
+        # The texture looks up R @ d, so its centre (Blender +X) shows at R^T @ X = -Y in Blender,
+        # which is +Z in the app volume (Y up).
+        np.testing.assert_allclose(environment.direction, (0.0, 0.0, 1.0), atol=1e-6)
+        np.testing.assert_allclose(environment.up, (0.0, 1.0, 0.0), atol=1e-6)
+        inverse = world.world_environment(environment_world("Texture", image, rotation=quarter, vector_type="TEXTURE"))
+        np.testing.assert_allclose(inverse.direction, (0.0, 0.0, -1.0), atol=1e-6)
+
+    def test_strength_and_rotation_changes_keep_the_same_source(self):
+        image = float_image("Shared", 8, 4, (1.0, 1.0, 1.0, 1.0))
+        first = world.world_environment(environment_world("A", image, strength=1.0))
+        second = world.world_environment(environment_world("B", image, strength=2.0))
+        self.assertEqual(first.source, second.source)
+        self.assertNotEqual(first, second)
+
+    def test_wide_images_are_averaged_down(self):
+        pixels = np.arange(2 * 4 * 3, dtype=np.float32).reshape(2, 4, 3)
+        small = world.downsample(pixels, max_width=2)
+        self.assertEqual(small.shape, (1, 2, 3))
+        np.testing.assert_allclose(small[0, 0], pixels[:2, :2].mean(axis=(0, 1)))
+
+    def test_unsupported_setups_use_the_viewport_colour_with_a_reason(self):
+        data = environment_world("Sky texture")
+        data.color = (0.1, 0.2, 0.3)
+        tree = data.node_tree
+        sky = tree.nodes.new("ShaderNodeTexNoise")
+        background = next(node for node in tree.nodes if node.type == "BACKGROUND")
+        tree.links.new(sky.outputs["Color"], background.inputs["Color"])
+        environment = world.world_environment(data)
+        np.testing.assert_allclose(environment.pixels[0, 0], (0.1, 0.2, 0.3), atol=1e-6)
+        self.assertIn("is not supported", environment.warnings[0])
+        missing = environment_world("Missing image", image=bpy.data.images.new("Empty", 4, 2))
+        missing.node_tree.nodes["Environment Texture"].image = None
+        self.assertIn("has no image", world.world_environment(missing).warnings[0])
+
+    def test_capture_reports_each_world_reason_once(self):
+        warnings = []
+        capture = sync.SceneCapture(warnings.append)
+        data = environment_world("Reported")
+        background = next(node for node in data.node_tree.nodes if node.type == "BACKGROUND")
+        value = data.node_tree.nodes.new("ShaderNodeValue")
+        data.node_tree.links.new(value.outputs[0], background.inputs["Strength"])
+        scene = SimpleNamespace(world=data)
+        capture.capture_environment(scene)
+        capture.capture_environment(scene)
+        self.assertEqual(warnings, ["World: World strength is linked; using strength 1."])
+
+
+class EnvironmentLightTests(unittest.TestCase):
+    """The World as an hdri light on backends with one: drawn nowhere, the studio light dropped, a
+    new strength or rotation updated in place, a new image sent as a new light."""
+
+    def setUp(self):
+        matte = anari.MaterialSupport("matte", [("color", anari.FLOAT32_VEC3)], ())
+        support = anari.MaterialSupport("physicallyBased", [("baseColor", anari.FLOAT32_VEC3)], (), matte=matte)
+        self.device = MaterialDevice(support, hdri=True)
+        self.mirror = sync.SceneMirror(self.device, "visrtx")
+        self.addCleanup(self.mirror.close)
+
+    def environment(self, source="a", strength=1.0, direction=(1.0, 0.0, 0.0)):
+        pixels = np.ones((2, 4, 3), dtype=np.float32)
+        return world.Environment((source,), pixels, strength, direction, (0.0, 1.0, 0.0))
+
+    def apply(self, environment, lights=()):
+        snapshot = sync.Snapshot(False)
+        snapshot.lights = list(lights)
+        snapshot.environment = environment
+        self.mirror.apply(snapshot)
+
+    def light(self, handle):
+        return self.device.objects[handle]
+
+    def test_the_environment_replaces_the_studio_light_and_stays_out_of_view(self):
+        self.apply(self.environment(strength=2.0))
+        self.assertEqual(len(self.mirror.lights), 1)
+        hdri = self.light(self.mirror.lights[0])
+        self.assertEqual(hdri["subtype"], "hdri")
+        self.assertEqual(hdri["parameters"]["visible"], 0)
+        self.assertEqual(hdri["parameters"]["scale"], 2.0)
+        radiance = self.light(hdri["parameters"]["radiance"])
+        self.assertEqual(radiance["parameters"]["size"], (4, 2, 2 * 4 * 3 * 4))
+        self.assertTrue(radiance["released"])  # the light holds it now
+
+    def test_lamps_and_the_environment_light_together(self):
+        self.apply(self.environment(), lights=[sync.STUDIO_LIGHT])
+        self.assertEqual([self.light(h)["subtype"] for h in self.mirror.lights], ["directional", "hdri"])
+
+    def test_a_new_strength_or_rotation_updates_the_light_in_place(self):
+        self.apply(self.environment())
+        hdri = self.mirror.environment
+        self.apply(self.environment(strength=4.0, direction=(0.0, 0.0, 1.0)))
+        self.assertIs(self.mirror.environment, hdri)
+        self.assertEqual(self.light(hdri)["parameters"]["scale"], 4.0)
+        self.assertEqual(self.light(hdri)["parameters"]["direction"], (0.0, 0.0, 1.0))
+        self.assertFalse(self.light(hdri)["released"])
+        self.assertEqual(sum(1 for o in self.device.objects.values() if o["kind"] == "Array2D"), 1)
+
+    def test_a_new_image_is_a_new_light_and_the_old_one_is_released(self):
+        self.apply(self.environment("a"))
+        old = self.mirror.environment
+        self.apply(self.environment("b"))
+        self.assertNotEqual(self.mirror.environment, old)
+        self.assertTrue(self.light(old)["released"])
+
+    def test_no_environment_brings_the_studio_light_back(self):
+        self.apply(self.environment())
+        old = self.mirror.environment
+        self.apply(None)
+        self.assertIsNone(self.mirror.environment)
+        self.assertTrue(self.light(old)["released"])
+        self.assertEqual([self.light(h)["subtype"] for h in self.mirror.lights], ["directional"])
+
+    def test_a_backend_without_an_hdri_light_ignores_the_world(self):
+        self.device.hdri = False
+        mirror = sync.SceneMirror(self.device, "visgl")
+        self.addCleanup(mirror.close)
+        snapshot = sync.Snapshot(False)
+        snapshot.environment = self.environment()
+        mirror.apply(snapshot)
+        self.assertEqual([self.light(h)["subtype"] for h in mirror.lights], ["directional"])
 
 
 class VolumeCullingTests(unittest.TestCase):
@@ -1065,7 +1294,8 @@ class SceneSyncTests(unittest.TestCase):
         self.assertEqual(self.mirror.objects, 1)
         self.assertEqual(self.mirror.triangles, 12)
         self.assertEqual(len(self.mirror.instances), 1)
-        self.assertEqual(len(self.mirror.lights), 1)
+        # The factory light, and the factory World's grey where the backend has an hdri light.
+        self.assertEqual(len(self.mirror.lights), 2 if self.mirror.environment_support else 1)
 
     def test_moving_an_object_keeps_its_geometry(self):
         before = self.group("Cube")
@@ -1588,7 +1818,7 @@ class SceneSyncTests(unittest.TestCase):
         self.tearDown()
         preferences = SimpleNamespace(anari_folder=FOLDER, backend="", max_users=2, fps=30,
                                       app_scale=0.25, render_scale=0.0, near=0.1, far=100.0,
-                                      ambient=0.3)
+                                      ambient=0.3, visrtx_materials="physical")
         native_set = anari.Device.set
 
         def offline_set(device, obj, name, data_type, value):
