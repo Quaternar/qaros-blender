@@ -159,6 +159,7 @@ per version with the add-on ZIP and a `manifest.json`. The QAROS Visualizer's Bl
   fails the release. A pull request is packaged as `X.Y.Z-pr.<number>` and never published.
 - Semantic versioning: a minor version adds features, a patch version only fixes. Tags go on
   `main`; there are no release branches.
+- This repository follows the shared QAROS versioning scheme: [ADR-0001: One versioning scheme for every QAROS repository](https://github.com/Quaternar/qaros/blob/main/docs/adr/0001-one-versioning-scheme.md).
 
 ### Release assets
 
