@@ -18,18 +18,32 @@ import package_release  # noqa: E402
 
 class VersionTests(unittest.TestCase):
     def test_version_file_equals_bl_info(self):
-        planned = package_release.check_versions()
-        self.assertRegex(planned, r"^\d+\.\d+\.\d+$")
+        last = package_release.check_versions()
+        self.assertRegex(last, r"^\d+\.\d+\.\d+$")
 
-    def test_release_versions_must_match_version_file(self):
-        planned = package_release.planned_version()
-        self.assertEqual(package_release.release_version(""), planned)
-        self.assertEqual(package_release.release_version(f"v{planned}"), planned)
-        self.assertEqual(package_release.release_version(f"{planned}-rc.2"), f"{planned}-rc.2")
-        self.assertEqual(package_release.release_version(f"{planned}-pr.7"), f"{planned}-pr.7")
-        for wrong in ("99.0.0", f"{planned}-beta", f"{planned}.1", "latest"):
+    def test_release_must_match_version_file_and_builds_the_next_patch(self):
+        last = package_release.last_release()
+        following = package_release.next_patch(last)
+        self.assertEqual(package_release.release_version(last), last)
+        self.assertEqual(package_release.release_version(f"v{last}"), last)
+        self.assertEqual(package_release.release_version(f"{following}-pr.7"), f"{following}-pr.7")
+        self.assertEqual(package_release.release_version(f"{following}-dev.3+1a2b3c4d"), f"{following}-dev.3+1a2b3c4d")
+        for wrong in ("99.0.0", following, f"{last}-pr.7", f"{last}-dev.3", f"{following}-rc.1",
+                      f"{last}-beta", f"{last}.1", "latest"):
             with self.assertRaises(package_release.ReleaseError, msg=wrong):
                 package_release.release_version(wrong)
+
+    def test_next_patch(self):
+        self.assertEqual(package_release.next_patch("0.4.1"), "0.4.2")
+        self.assertEqual(package_release.next_patch("1.9.9"), "1.9.10")
+
+    def test_default_version_is_the_release_or_the_next_patch(self):
+        last = package_release.last_release()
+        version = package_release.default_version()
+        if version != last:
+            following = re.escape(package_release.next_patch(last))
+            self.assertRegex(version, rf"^{following}-dev\.\d+(\+[0-9a-f]+)?$")
+        self.assertEqual(package_release.release_version(""), version)
 
     def test_bl_info_out_of_step_with_version_file_fails(self):
         info = dict(package_release.bl_info(), version=(99, 0, 0))
@@ -40,7 +54,7 @@ class VersionTests(unittest.TestCase):
 
 class PackageTests(unittest.TestCase):
     def test_zip_and_manifest(self):
-        version = f"{package_release.planned_version()}-pr.1"
+        version = f"{package_release.next_patch(package_release.last_release())}-pr.1"
         with tempfile.TemporaryDirectory() as out:
             archive, manifest_path = package_release.package(version, Path(out))
             self.assertEqual(archive.name, f"qaros_blender_anari-{version}.zip")

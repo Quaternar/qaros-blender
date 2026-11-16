@@ -11,8 +11,9 @@
 | `tools/run_tests.py` | runs the tests, see [Tests](#tests) |
 | `tools/build_zip.py` | writes `dist/qaros_blender_anari.zip` |
 | `tools/package_release.py` | checks `VERSION` against `bl_info["version"]`; writes the release assets |
-| `VERSION` | the next planned release `X.Y.Z`, equal to `bl_info["version"]` |
+| `VERSION` | the last release `X.Y.Z`, equal to `bl_info["version"]` |
 | `.github/workflows/release.yml` | packages every pull request, publishes a release on a `v*` tag |
+| `.github/workflows/app-release.yml`, `.github/app-release.json` | releases every merge that changes behaviour, see [Releasing](#releasing) |
 | `tools/blender_material_validation.py` | live material reference scene for checking a backend by eye |
 | `tools/prepare_blender_addon.py` | adds `qaros` to the library list of Khronos's `CustomAnariRender.py` render engine |
 
@@ -205,15 +206,19 @@ per version with the add-on ZIP and a `manifest.json`. The QAROS Visualizer's Bl
 
 ### Versions
 
-- [`VERSION`](../VERSION) holds the next planned version `X.Y.Z`. Blender needs a literal
-  `bl_info["version"]` in `blender/qaros_anari/__init__.py`: keep it equal to `VERSION`. CI
+- [`VERSION`](../VERSION) holds the version of the last release `X.Y.Z`. It changes only in a
+  release commit, which CI makes. Blender needs a literal `bl_info["version"]` in
+  `blender/qaros_anari/__init__.py`: it equals `VERSION`, and CI
   (`tools/package_release.py --check`) fails when they differ.
-- Release tags are the add-on's own version, not the QAROS version: `vX.Y.Z`, or `vX.Y.Z-rc.N` for
-  a candidate (published as a GitHub pre-release). A tag whose `X.Y.Z` differs from `VERSION`
-  fails the release. A pull request is packaged as `X.Y.Z-pr.<number>` and never published.
+- Release tags are the add-on's own version, not the QAROS version: `vX.Y.Z`. A tag whose `X.Y.Z`
+  differs from `VERSION` fails the release. There are no candidate (`-rc`) tags.
+- Any other build carries the next patch: a pull request is packaged as `X.Y.(Z+1)-pr.<number>`
+  and never published; a branch build is `X.Y.(Z+1)-dev.M+<sha>`, M commits after the last tag
+  (`python tools/package_release.py --print-version`).
 - Semantic versioning: a minor version adds features, a patch version only fixes. Tags go on
   `main`; there are no release branches.
-- This repository follows the shared QAROS versioning scheme: [ADR-0001: One versioning scheme for every QAROS repository](https://github.com/Quaternar/qaros/blob/main/docs/adr/0001-one-versioning-scheme.md).
+- This repository follows the shared QAROS versioning scheme: [ADR-0001: One versioning scheme for every QAROS repository](https://github.com/Quaternar/qaros/blob/main/docs/adr/0001-one-versioning-scheme.md),
+  refined for apps by [ADR-0002: QAROS apps release on every merge that changes behaviour](https://github.com/Quaternar/qaros/blob/main/docs/adr/0002-app-release-on-merge.md).
 
 ### Release assets
 
@@ -249,17 +254,38 @@ per version with the add-on ZIP and a `manifest.json`. The QAROS Visualizer's Bl
   Blender enables (`--addons qaros_anari`).
 - `python tools/package_release.py --out-dir dist/release` writes both locally.
 
-### Release `X.Y.Z`
+### Every merge that changes behaviour is a release
 
-1. Optional candidate: tag the commit to test `vX.Y.Z-rc.N` on `main` and push the tag.
-2. Release commit: move the entries of `## [Unreleased]` in `CHANGELOG.md` under
-   `## [X.Y.Z] - YYYY-MM-DD` and leave an empty `## [Unreleased]` above it.
-3. Tag that commit `vX.Y.Z` on `main` and push the tag. `release.yml` runs the unit tests, builds
-   the ZIP and `manifest.json` and attaches them to the GitHub release `vX.Y.Z`.
-4. Bump: in the next commit set `VERSION` and `bl_info["version"]` to the next planned version
-   (`X.(Y+1).0`), never in the tagged commit.
+Nobody tags or bumps `VERSION` by hand. When a pull request merges to `main`,
+`.github/workflows/app-release.yml` decides its bump. If the bump is not *none*, CI writes the new
+version into `VERSION` and `bl_info["version"]` (the files in `.github/app-release.json`), moves the
+entries of `## [Unreleased]` in `CHANGELOG.md` under `## [X.Y.Z] - YYYY-MM-DD`, commits
+`chore(release): vX.Y.Z`, tags it `vX.Y.Z` and pushes both. It then runs `release.yml` on the tag,
+which runs the unit tests, builds the ZIP and `manifest.json` and attaches them to the GitHub
+release `vX.Y.Z`.
+
+A `release:*` label on the pull request wins; without one, its title decides:
+
+| Label | Title (Conventional Commit) | Bump | From `0.4.1` |
+|---|---|---|---|
+| `release:major` | | major | `1.0.0` |
+| | `feat!: ...`, `fix(x)!: ...`, or `BREAKING` in the title | major (minor below 1.0.0) | `0.5.0` |
+| `release:minor` | `feat: ...` | minor | `0.5.0` |
+| `release:patch` | `fix: ...`, `perf: ...`, `revert: ...` | patch | `0.4.2` |
+| `release:none` | `docs`, `ci`, `chore`, `test`, `refactor`, `style`, `build` | none | none |
+
+- The check **Release bump** on every pull request shows the version merging it releases. It fails
+  when the title is no Conventional Commit of a known type and no `release:*` label is set.
+- The release ships every `Unreleased` entry, so the changelog sets a floor: `Added` or `Changed`
+  entries make it at least a minor, `Fixed` at least a patch, `Removed` at least a breaking bump.
+- To merge without releasing (pull requests that only make sense together), label them
+  `release:none`. The next releasing merge ships them all.
+- A failed release build: fix it on `main`. If the fix was in CI only, run `release.yml` again
+  with the tag (`gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z`). A tag never moves.
 
 ## Commits
 
 - Subject `area: what changed` (Conventional Commits), body terse bullets.
 - A user-visible change gets its `Unreleased` entry in `CHANGELOG.md` in the same commit.
+- A pull request's title is a Conventional Commit too: it decides the release when the pull
+  request merges (see [Releasing](#every-merge-that-changes-behaviour-is-a-release)).

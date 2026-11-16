@@ -3,6 +3,7 @@
 """Write the release assets of the add-on: qaros_blender_anari-<version>.zip and manifest.json.
 
     python tools/package_release.py --check                       # VERSION equals bl_info["version"]
+    python tools/package_release.py --print-version               # the version of this checkout
     python tools/package_release.py [--version 0.4.0] [--out-dir dist/release]
 
 The ZIP is the one Blender's Install from Disk takes (tools/build_zip.py: the folder qaros_anari/ at
@@ -14,15 +15,19 @@ latest release, in the format of the other QAROS app releases (qaros-rerun):
                  "app_version": "0.4.0", "min_qaros_version": "0.9.0",
                  "min_blender_version": "4.5.0", "addon_module": "qaros_anari"}]}
 
-`platform` is `any`: the add-on is pure Python and loads QAROS's own ANARI device. The version is
-the file VERSION (`X.Y.Z`, the next planned release), or --version: `X.Y.Z`, `X.Y.Z-rc.N` or
-`X.Y.Z-pr.N`, whose `X.Y.Z` must equal VERSION. VERSION must equal bl_info["version"]."""
+`platform` is `any`: the add-on is pure Python and loads QAROS's own ANARI device. The file VERSION
+holds the last release `X.Y.Z` and must equal bl_info["version"]. The version is --version, or else
+the checkout's own (default_version): `X.Y.Z` on the commit tagged `vX.Y.Z`, otherwise the next
+patch `X.Y.(Z+1)-dev.M+<sha>` (M commits since the last `v*` tag). A release `X.Y.Z` must equal
+VERSION; a pull request build `X.Y.(Z+1)-pr.N` and a development build `X.Y.(Z+1)-dev.M[+sha]`
+carry the next patch (ADR-0002 of Quaternar/qaros)."""
 import argparse
 import ast
 import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 
 import build_zip
@@ -43,14 +48,14 @@ PLATFORM = "any"
 MIN_QAROS_VERSION = "0.9.0"
 
 CORE = re.compile(r"^\d+\.\d+\.\d+$")
-RELEASE = re.compile(r"^(\d+\.\d+\.\d+)(-(rc|pr)\.\d+)?$")
+RELEASE = re.compile(r"^(\d+\.\d+\.\d+)(-(pr|dev)\.\d+(\+[0-9a-z.]+)?)?$")
 
 
 class ReleaseError(Exception):
     pass
 
 
-def planned_version():
+def last_release():
     text = VERSION_FILE.read_text(encoding="utf-8").strip()
     if not CORE.match(text):
         raise ReleaseError(f"VERSION must hold X.Y.Z, found {text!r}")
@@ -70,24 +75,52 @@ def dotted(numbers):
     return ".".join(str(number) for number in numbers)
 
 
+def next_patch(version):
+    major, minor, patch = (int(part) for part in version.split("."))
+    return f"{major}.{minor}.{patch + 1}"
+
+
 def check_versions():
-    """VERSION, equal to bl_info["version"]."""
-    planned = planned_version()
+    """VERSION (the last release), equal to bl_info["version"]."""
+    last = last_release()
     addon = dotted(bl_info()["version"])
-    if addon != planned:
-        raise ReleaseError(f'bl_info["version"] is {addon}, VERSION is {planned}: keep them equal')
-    return planned
+    if addon != last:
+        raise ReleaseError(f'bl_info["version"] is {addon}, VERSION is {last}: keep them equal')
+    return last
+
+
+def default_version():
+    """X.Y.Z on the commit tagged vX.Y.Z, else X.Y.(Z+1)-dev.M+sha (M commits since the last v* tag;
+    X.Y.(Z+1)-dev.0 without git or tags)."""
+    last = check_versions()
+    try:
+        described = subprocess.run(
+            ["git", "describe", "--tags", "--long", "--abbrev=8", "--match", "v[0-9]*"],
+            cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return f"{next_patch(last)}-dev.0"
+    match = re.match(r"^v(.+)-(\d+)-g([0-9a-f]+)$", described)
+    if not match:
+        return f"{next_patch(last)}-dev.0"
+    tag, commits, sha = match.groups()
+    if commits == "0" and tag == last:
+        return last
+    return f"{next_patch(last)}-dev.{commits}+{sha}"
 
 
 def release_version(requested):
-    planned = check_versions()
-    version = (requested or planned).strip()
+    last = check_versions()
+    version = requested.strip() if requested else default_version()
     version = version[1:] if version.startswith("v") else version
     match = RELEASE.match(version)
     if not match:
-        raise ReleaseError(f"{version!r} is not X.Y.Z, X.Y.Z-rc.N or X.Y.Z-pr.N")
-    if match.group(1) != planned:
-        raise ReleaseError(f"version {version} does not match VERSION {planned}: fix VERSION or the tag")
+        raise ReleaseError(f"{version!r} is not X.Y.Z, X.Y.Z-pr.N or X.Y.Z-dev.N")
+    prerelease = bool(match.group(2))
+    expected = next_patch(last) if prerelease else last
+    if match.group(1) != expected:
+        if prerelease:
+            raise ReleaseError(f"version {version} must carry the next patch {expected} (VERSION {last})")
+        raise ReleaseError(f"version {version} does not match VERSION {last}: fix VERSION or the tag")
     return version
 
 
@@ -122,12 +155,17 @@ def package(version, out_dir):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--check", action="store_true", help="only check that VERSION equals bl_info['version']")
-    parser.add_argument("--version", default="", help="X.Y.Z, X.Y.Z-rc.N or X.Y.Z-pr.N (default: VERSION)")
+    parser.add_argument("--print-version", action="store_true", help="only print the version of this checkout")
+    parser.add_argument("--version", default="",
+                        help="X.Y.Z, X.Y.Z-pr.N or X.Y.Z-dev.N (default: the version of this checkout)")
     parser.add_argument("--out-dir", type=Path, default=ROOT / "dist" / "release")
     args = parser.parse_args()
     try:
         if args.check:
             print(f"VERSION {check_versions()} equals bl_info['version']")
+            return 0
+        if args.print_version:
+            print(release_version(""))
             return 0
         archive, manifest_path = package(release_version(args.version), args.out_dir.resolve())
     except ReleaseError as error:
