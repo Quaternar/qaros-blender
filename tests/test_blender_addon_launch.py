@@ -47,7 +47,7 @@ class LaunchedAddonTests(unittest.TestCase):
         self.assertEqual(prefs.anari_folder, "")
         self.assertEqual(prefs.backend, qaros_anari.BACKEND_AUTOMATIC)
         self.assertEqual(prefs.max_users, 2)
-        self.assertEqual(prefs.fps, 30)
+        self.assertEqual(prefs.render_rate, 30)
 
     def test_1b_controls_panel_settings_read_and_keep_the_defaults(self):
         tabs, panels = qaros_anari.controls_settings()

@@ -173,7 +173,7 @@ Blender's own **File → Import → Universal Scene Description** gets the first
 | **ANARI folder** | empty | folder with `anari.dll` and `anari_library_qaros.dll`; empty uses the ANARI device of the QAROS that started Blender, else the installed one on the system `PATH` | after a Blender restart |
 | **Backend** | Automatic | the renderer, see [Backends](#backends) | after a Blender restart |
 | **Users** | 2 | how many headsets and visualizers can watch at once | next start |
-| **Frame rate** | 30 | stereo pairs per second per user | next start |
+| **Render rate** | 30 | frames per second each user's headset gets (1 to 120). Lower leaves the renderer time for more users and the CPU backends; changes to the scene then show later, while head motion stays smooth (the headset warps the newest frame). A QAROS older than this setting ignores it and renders at 30 | at once |
 | **Render scale** | 0 | share of the headset's resolution each eye renders at, upscaled for the headset: 0 is automatic (half on OSPRay and Helide, full on VisGL), otherwise 0.25 to 1. Below full resolution the status ends with the share in use, for example "at 50 % resolution" | next start |
 | **Scale** | 0.25 | room metres per Blender unit | when the app volume is created ([App volume](#app-volume)) |
 | **Near**, **Far** | 0.1, 100 | depth range in Blender units; content outside it is not drawn | next start |

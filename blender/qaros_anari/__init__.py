@@ -69,6 +69,13 @@ VISRTX_PHYSICAL = "physical"
 VISRTX_MATTE = "matte"
 
 
+# qar.renderRate: frames per second per user, in [RENDER_RATE_MIN, RENDER_RATE_MAX]; the device's
+# own default is RENDER_RATE_DEFAULT.
+RENDER_RATE_DEFAULT = 30
+RENDER_RATE_MIN = 1
+RENDER_RATE_MAX = 120
+
+
 class Preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
 
@@ -92,7 +99,17 @@ class Preferences(bpy.types.AddonPreferences):
         default=BACKEND_AUTOMATIC,
     )
     max_users: bpy.props.IntProperty(name="Users", default=2, min=1, max=32)
-    fps: bpy.props.IntProperty(name="Frame rate", description="Stereo pairs per second per user", default=30, min=1, max=90)
+    render_rate: bpy.props.IntProperty(
+        name="Render rate",
+        description=(
+            "Frames per second each user's headset gets. Lower leaves the renderer time for more users; "
+            "scene changes then show later, head motion stays smooth. Applies at once, also while streaming"
+        ),
+        default=RENDER_RATE_DEFAULT,
+        min=RENDER_RATE_MIN,
+        max=RENDER_RATE_MAX,
+        update=lambda prefs, context: STREAMER.apply_render_rate(prefs.render_rate),
+    )
     app_scale: bpy.props.FloatProperty(
         name="Scale", description="Room metres per Blender unit", default=0.25, min=0.001, max=100.0
     )
@@ -148,7 +165,7 @@ class Preferences(bpy.types.AddonPreferences):
         layout.prop(self, "backend")
         row = layout.row()
         row.prop(self, "max_users")
-        row.prop(self, "fps")
+        row.prop(self, "render_rate")
         row.prop(self, "render_scale")
         row = layout.row()
         row.prop(self, "app_scale")
@@ -376,7 +393,8 @@ class Streamer:
         # QAROS on this PC by local enrollment.
         device.set(device.handle, "qar.stream", anari.BOOL, 1)
         device.set(device.handle, "qar.maxUsers", anari.INT32, prefs.max_users)
-        device.set(device.handle, "qar.fps", anari.INT32, prefs.fps)
+        # A qaros older than qar.renderRate reports it as unknown and renders at its own 30.
+        device.set(device.handle, "qar.renderRate", anari.FLOAT32, float(prefs.render_rate))
         device.set(device.handle, "qar.renderScale", anari.FLOAT32, render_scale_parameter(prefs.render_scale))
         device.set(device.handle, "qar.appScale", anari.FLOAT32, prefs.app_scale)
         device.set(device.handle, "qar.near", anari.FLOAT32, prefs.near)
@@ -424,6 +442,15 @@ class Streamer:
         add_handlers()
         bpy.app.timers.register(self.open_panel, first_interval=PANEL_POLL_INTERVAL)
         log(f"streaming '{self.scene_name}': {self.mirror.objects} objects, {self.mirror.triangles} triangles")
+
+    def apply_render_rate(self, rate):
+        """Hands a changed Render rate preference to the running device: every user's next frame
+        renders at it."""
+        if not self.running or self.stopping or self.device is None:
+            return
+        self.device.set(self.device.handle, "qar.renderRate", anari.FLOAT32, float(rate))
+        self.device.commit()
+        log(f"render rate {rate} frames per second per user")
 
     def apply_targets(self, choice):
         """Hands a changed Streams to choice to the running device: its next commit stops the

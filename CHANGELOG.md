@@ -10,6 +10,10 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ### Added
 
+- **Render rate** preference (frames per second per user, 1 to 120, default 30) replaces
+  **Frame rate**, and applies at once, also while streaming. A lower rate leaves the renderer time
+  for more users; scene changes then show later, head motion stays smooth. A Frame rate you had
+  set is not carried over: set Render rate again.
 - **Tools** tab, first on the controls panel in the headset, and **Tool** in the QAROS tab and the
   preferences: **Navigation** (the default; hand gestures pan, zoom and turn the whole scene) or
   **Object selection** (a click selects what the hand's ray hits by Blender's ray cast; one-hand

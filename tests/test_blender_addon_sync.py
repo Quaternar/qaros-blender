@@ -1816,7 +1816,7 @@ class SceneSyncTests(unittest.TestCase):
 
     def test_repeated_device_lifecycles_wait_for_unmapped_frames(self):
         self.tearDown()
-        preferences = SimpleNamespace(anari_folder=FOLDER, backend="", max_users=2, fps=30,
+        preferences = SimpleNamespace(anari_folder=FOLDER, backend="", max_users=2, render_rate=30,
                                       app_scale=0.25, render_scale=0.0, near=0.1, far=100.0,
                                       ambient=0.3, visrtx_materials="physical")
         native_set = anari.Device.set

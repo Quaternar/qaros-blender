@@ -26,7 +26,7 @@ class BindingTests(unittest.TestCase):
         d = self.device
         d.set(d.handle, "qar.stream", anari.BOOL, 0)
         d.set(d.handle, "qar.maxUsers", anari.INT32, 2)
-        d.set(d.handle, "qar.fps", anari.INT32, 30)
+        d.set(d.handle, "qar.renderRate", anari.FLOAT32, 30.0)
         d.set(d.handle, "qar.appScale", anari.FLOAT32, 0.25)
         d.set(d.handle, "qar.near", anari.FLOAT32, 0.1)
         d.set(d.handle, "qar.far", anari.FLOAT32, 100.0)
@@ -166,6 +166,23 @@ class BindingTests(unittest.TestCase):
         errors = self.target_errors()
         self.assertEqual(len(errors), 1, "a malformed id is reported once")
         self.assertIn("receiver-1", errors[0])
+
+    def render_rate_errors(self):
+        found = [text for severity, text in self.messages if severity == "error" and "qar.renderRate" in text]
+        self.messages[:] = [m for m in self.messages if "qar.renderRate" not in m[1]]
+        return found
+
+    def test_render_rate_takes_a_rate_and_unset_and_reports_one_out_of_range(self):
+        d = self.device
+        for rate in (15.0, 30.0, 1.0, 120.0):
+            d.set(d.handle, "qar.renderRate", anari.FLOAT32, rate)
+            d.commit()
+        d.unset(d.handle, "qar.renderRate")
+        d.commit()
+        self.assertEqual(self.render_rate_errors(), [], "rates in range and unset are taken")
+        d.set(d.handle, "qar.renderRate", anari.FLOAT32, 500.0)
+        d.commit()
+        self.assertEqual(len(self.render_rate_errors()), 1, "a rate out of range is reported once")
 
     def test_session_targets_is_unanswered_until_streaming(self):
         # Streaming is off here: no session, so no list (the add-on then shows only its saved choice).
