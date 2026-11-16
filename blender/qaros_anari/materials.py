@@ -16,6 +16,8 @@ class MaterialDescription:
     emission_strength: float = 1.0
     is_principled: bool = False
     warnings: tuple[str, ...] = ()
+    # Material > Viewport Display > Color: what Blender's Solid shading draws (shading.py).
+    viewport_color: tuple[float, float, float] = (0.8, 0.8, 0.8)
 
     @property
     def emissive(self):
@@ -94,14 +96,17 @@ def material_description(material):
         return FALLBACK_MATERIAL
     viewport = tuple(material.diffuse_color)
     if not material.use_nodes:
-        return MaterialDescription(base_color=viewport[:3], opacity=max(0.0, min(1.0, viewport[3])))
+        return MaterialDescription(
+            base_color=viewport[:3], opacity=max(0.0, min(1.0, viewport[3])), viewport_color=viewport[:3]
+        )
     if material.node_tree is None:
         node, reason = None, "Node material has no node tree; using viewport colour."
     else:
         node, reason = principled_shader(material.node_tree)
     if node is None:
         return MaterialDescription(
-            base_color=viewport[:3], opacity=max(0.0, min(1.0, viewport[3])), warnings=(reason,)
+            base_color=viewport[:3], opacity=max(0.0, min(1.0, viewport[3])), warnings=(reason,),
+            viewport_color=viewport[:3],
         )
     warnings = []
     base_color = tuple(constant_input(node, "Base Color", viewport, warnings, "viewport colour"))[:3]
@@ -119,7 +124,7 @@ def material_description(material):
         emission_color, emission_strength = (0.0, 0.0, 0.0), 0.0
     return MaterialDescription(
         base_color, opacity, metallic, roughness, emission_color, emission_strength,
-        is_principled=True, warnings=tuple(warnings),
+        is_principled=True, warnings=tuple(warnings), viewport_color=viewport[:3],
     )
 
 
