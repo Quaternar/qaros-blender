@@ -81,18 +81,69 @@ sequenceDiagram
   crashed, or the hub restarted under it) is taken over by `get_or_create`, which keeps its place
   and points it at this run's bundle; a runtime from before that rule leaves such a panel on the
   earlier run's bundle, shown as "Page not available".
-- **Pointing** (`pointing.py`): a click selects by Blender's ray cast. The ray cast reports a
-  collection instance as its prototype; the pick maps it to the instancing object through the
-  depsgraph's instances (matched by matrix), so a drag never moves the prototype inside every
+- **Pointing** (`pointing.py`): a click selects by Blender's ray cast (`controls.pick`) along the
+  hand's ray, whose points QAROS reports in app content space (Blender's world, Y up). The ray cast
+  reports a collection instance as its prototype; the pick maps it to the instancing object through
+  the depsgraph's instances (matched by matrix), so a drag never moves the prototype inside every
   instance.
+- **One selection** (`Pointing.selection`): Blender's active object while it is selected. A click
+  in the headset selects through Blender (`controls.select_only`, which also redraws the viewport,
+  outliner and properties), and every tick reads it back (`Controls.follow_selection`), so a
+  selection made in Blender's UI is the gestures' and the panel's too; a changed selection reposts
+  the panel at once.
+- **Selection outline:** the device draws the outline from the backend's `channel.instanceId`
+  (`qar.selection`, documented with the device in QAROS). Every instance the mirror creates carries
+  its object's ANARI `id` (`SceneMirror.object_id`: 1, 2, ... in the order objects first appear,
+  kept for the session). `Streamer.follow_selection` runs after every depsgraph update (a selection
+  change is one) and hands a changed selection to the sync worker, which outlines it after the
+  snapshots before it (`SceneMirror.select`).
+  - The selected object never sits in a merged chunk: a chunk's one instance has no single id. It
+    leaves its chunk when selected, the world is committed, and only then is `qar.selection` set;
+    deselected, it may merge again.
+  - One object: Blender's selected active one, as the gestures use. VisGL has no id channel, so
+    nothing is outlined there.
+- **Double tap** (`pointing.Taps`): QAROS reports no double tap for an app volume (the C API's tap
+  count, `qar_gui_panel_gesture_get_tap_count`, is a GUI panel gesture's only). The add-on counts two
+  clicks of one user's hand within `DOUBLE_TAP_SECONDS` (0.5 s), stamped when QAR's thread
+  receives them.
 - **View, not model:** the app pose and app scale (gestures, the Visualizer's Content mode,
-  `qar.fitBox`) are a camera transform: the device renders each eye in app content space, so the
-  add-on never writes a Blender object for them. Only a one-hand drag that grabbed the user's
-  selection moves it: the user is in the object mode (one-hand drag reported, not mapped) only
-  while their latest hover picks their selection (`Controls.follow_hovers`, one ray cast per new
-  hover, never during their drag), and a drag in that mode moves the object only when its own
-  hit, else the hand's latest hover, picks the selection (`Controls.aimed`). A pinch on a GUI panel
-  or on empty space reaches the volume without a hit and moves nothing.
+  `qar.fitBox`) are a camera transform: the device renders each eye in app content space, so
+  changing them never writes a Blender object.
+- **Blender decides what a gesture does** (`gestures.py`, proof of concept): while streaming, the
+  add-on replaces the volume's default gesture configuration with one where no rule moves the app
+  (`panel.app_decides_from`: mapping none, precision 1, constant sensitivity, plus a two-hand turn
+  about the vertical, which QAROS's default lacks, and a solid green click ray), and puts the
+  volume's own configuration back when it stops. QAROS still recognises the gestures and draws the
+  rays and hands.
+  - **Tools** (`gestures.TOOLS`): Navigation (every manipulation moves the view; only a double tap
+    selects) and Object selection (a click selects; manipulations move only the selection, and with
+    no selection or a drag that misses it do nothing and log it). One tool for every user: the
+    add-on's `tool` preference, which the page's Tools tab writes (`{"t": "tool"}`) and the state
+    message carries with the list of tools, so a tool added to `gestures.TOOLS` (and
+    `protocol.TOOL_IDS`) shows on the page without page changes.
+  - Each manipulation is decided once, when it starts, on QAR's callback thread
+    (`Controls.decide`, `gestures.target`) from the tool, whether Blender has a selection, and the
+    user's aim, which the UI thread publishes (`Controls.follow_hovers`, one ray cast per new
+    hover).
+  - View gestures go to a worker thread (`gestures.ViewWorker`) that writes the app pose and scale
+    through the C API, newest update first. They do not run in the callback, nor on Blender's
+    20 Hz timer, which is too slow for a view that follows the hands.
+  - Object gestures go to the UI thread. A one-hand drag moves the selection only when its own
+    hit, else the hand's latest hover, picks it (`Controls.aimed`). Two hands scale or turn the
+    selection about its origin (`controls.twisted`).
+  - **Ray feedback:** a ray's style is set per gesture kind by the mapping rule
+    (`controller_ray_style`), within a gesture mode, and modes are switched per peer. QAROS draws a
+    hand's ray in its click rule's style while the hand pinches before a drag commits, and for
+    0.4 s after a click, else in the hover rule's style. The add-on gives the click rule
+    `panel.CLICK_RAY` (solid green). There is no per-event or per-hand style an app sets: a style
+    only for a click that selected something, a distinct double-tap style, or an app-chosen
+    duration would need the C API to gain one (for example a call that styles one peer's hand's
+    ray for a time).
+  - No C API change: the configuration, gesture events and app transform calls already exist.
+    Before, QAROS mapped every gesture to the app transform and the add-on switched a user to an
+    "object mode" only while their ray was on their selection.
+  - The Visualizer's own mouse Content mode still writes the app transform directly (it ignores the
+    volume's rules), outside this path.
 - **Streams to** (`targets.py`): the device reports the session's target applications in
   `qar.sessionTargets` (JSON) and streams to the peer ids in `qar.targets` (unset: every one). The
   tab reads the list at most every 0.5 s (panels redraw on every mouse move), and the 1 s redraw
@@ -142,6 +193,9 @@ python tools/run_tests.py --anari-folder <build>\qar-anari-device\bin --backend 
 - `test_blender_usd_scene.py` renders `tests/usd/usd_scene.usda` and checks each object by the colour
   where it lands, so a lost material, opacity, instance or light shows as a wrong pixel.
 - `test_blender_addon_sync.py SceneSyncTests.<method>` runs one material case.
+- `test_blender_selection_outline.py` (group `blender`) checks the outline's ids and `qar.selection`
+  against a stand-in device: the add-on's handlers and worker in Blender, and the chunk a selected
+  object leaves.
 
 ## Releasing
 

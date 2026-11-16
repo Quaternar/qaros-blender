@@ -20,7 +20,7 @@ const MATERIAL_ROWS = [
   { key: "metallic", index: 0, label: "Me", min: 0, max: 1, step: 0.05, digits: 2 },
 ];
 
-let state = null; // {object, material, frame}
+let state = null; // {object, material, frame, tabs, tool, tools}
 let panels = []; // [{name, title, items}]: Blender's panels, replayed
 let panelName = null;
 let panelSignature = "";
@@ -133,6 +133,30 @@ function showRow(entry, value, enabled) {
   entry.value.textContent = format(value, spec.digits, spec.unit);
 }
 
+// ---- Tools: what hand gestures in the app volume do, one tool for every user ----
+
+let toolSignature = "";
+
+// The tools come with the state ([id, name, description]), so a tool Blender adds shows here too.
+function renderTools() {
+  const tools = Array.isArray(state?.tools) ? state.tools : [];
+  const list = document.getElementById("tool-list");
+  const signature = JSON.stringify(tools);
+  if (signature !== toolSignature) {
+    toolSignature = signature;
+    list.replaceChildren();
+    for (const [id, name, description] of tools) {
+      const button = element("button");
+      button.id = `tool-${id}`;
+      button.dataset.tool = id;
+      button.append(element("span", "tool-name", name), element("span", "tool-description", description));
+      button.addEventListener("click", () => send({ t: "tool", value: id }));
+      list.append(button);
+    }
+  }
+  for (const button of list.querySelectorAll("button")) button.classList.toggle("active", button.dataset.tool === state?.tool);
+}
+
 // ---- Hand-written tabs: Object, Material, Frame ----
 
 function buildObjectRows() {
@@ -156,6 +180,7 @@ function showTabs(tabs) {
 
 function render() {
   showTabs(state?.tabs);
+  renderTools();
   const object = state?.object;
   document.getElementById("object-name").textContent = object ? object.name : "No object";
   const values = object ? object[group] : null;
@@ -164,7 +189,7 @@ function render() {
     if (entry) showRow(entry, values ? values[index] : null, !!values);
   }
   document.getElementById("object-note").textContent = !object
-    ? "Select an object in Blender."
+    ? "Double tap an object, or select it in Blender."
     : group === "rotation" && !object.rotation
       ? "Rotation mode is not Euler: edit it in Blender."
       : "";
@@ -359,7 +384,7 @@ function buildPanel(current) {
   for (const key of [...rows.keys()]) if (key.includes(":")) rows.delete(key);
   updaters.clear();
   if (!current) {
-    body.append(element("p", "note", "Select an object in Blender."));
+    body.append(element("p", "note", "Double tap an object, or select it in Blender."));
     return;
   }
   current.items.forEach((item, position) => {

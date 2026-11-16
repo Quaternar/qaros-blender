@@ -141,7 +141,7 @@ def build_scene(args):
     prefs = qaros_anari.preferences()
     prefs.anari_folder = str(args.anari_folder.resolve())
     prefs.backend = args.backend
-    prefs.max_users, prefs.fps, prefs.app_scale, prefs.ambient = 4, 30, 0.35, 0.05
+    prefs.max_users, prefs.render_rate, prefs.app_scale, prefs.ambient = 4, 30, 0.35, 0.05
     material, node = principled("Live shared material", (0.25, 0.125, 0.0625))
     for x in (-0.7, 0.7):
         bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=20, radius=0.6, location=(x, -0.2, 0.0))

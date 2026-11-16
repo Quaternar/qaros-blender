@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: MIT
 """Pointing into the app volume, without Blender: where a gesture's points are in Blender's world,
-the ray a click casts, and what each user's one-hand drag does to the object they selected.
+the ray a click casts, which clicks are double taps, and what a one-hand drag does to the selected
+object.
 
-Moving, turning or scaling the app volume's content (a one-hand drag in the default mode, every
-two-hand gesture, Fit scene to volume) is a view change: the device renders each user's eyes in app
-content space, so it moves the camera over the scene and never touches a Blender object. Only a
-one-hand drag that grabs the user's selected object edits the scene. A user is in the object mode
-only while their ray is on their selection: a drag anywhere else, a GUI panel's title bar included,
-stays a view change.
+Moving, turning or scaling the app volume's content (a view gesture, Fit scene to volume) is a view
+change: the device renders each user's eyes in app content space, so it moves the camera over the
+scene and never touches a Blender object. Which gestures edit the scene instead is gestures.py's
+decision; a one-hand drag edits it only when it grabs the selected object, so a drag anywhere
+else, a GUI panel's title bar included, never moves an object.
 
 A gesture's points are in app content space: the ANARI world the add-on builds, which is Blender's
 world with Y up (sync.py: Blender (x, y, z) -> (x, z, -y)), unscaled. A one-hand drag's
@@ -101,9 +101,34 @@ def click_ray(event, hover=None):
     return origin, tuple(d / length for d in direction)
 
 
+# Two clicks of one hand at most this far apart (seconds) are a double tap. QAROS reports no double
+# tap for an app volume (its tap count is a GUI panel gesture's only), so the add-on counts clicks.
+# A pinch is slower than a finger on glass (QAROS's panels take 0.35 s): pinch, release and pinch
+# again takes a hand about 0.3 to 0.45 s, and each click reaches Blender with some jitter.
+DOUBLE_TAP_SECONDS = 0.5
+
+
+class Taps:
+    """Counts clicks per user and hand into double taps. Pure: the caller gives each click's time."""
+
+    def __init__(self, window=DOUBLE_TAP_SECONDS):
+        self.window = window
+        self.last = {}  # (peer, hand) -> time of a click not yet part of a double tap
+
+    def tap(self, peer, hand, when):
+        """Whether the click at `when` is the second of a double tap. A double tap's clicks are used
+        up: a third click starts the next pair."""
+        key = (peer, hand)
+        previous = self.last.pop(key, None)
+        if previous is not None and 0.0 <= when - previous <= self.window:
+            return True
+        self.last[key] = when
+        return False
+
+
 @dataclass
 class Drag:
-    """One user's drag of their selected object."""
+    """One user's drag of the selected object."""
 
     object_name: str
     object_start: tuple  # the object's world translation when the drag began
@@ -112,37 +137,27 @@ class Drag:
 
 @dataclass
 class Pointing:
-    """Per-user state: which object each user selected, and their drag in progress. Pure: the
-    caller reads and writes Blender and the gesture modes."""
+    """The selected object and the drags in progress. One selection for every user: Blender's
+    selected active object, whether a click in the headset or Blender's own UI selected it, so the
+    controls panel, the viewport and the gestures agree. Pure: the caller reads and writes Blender."""
 
-    selected: dict = field(default_factory=dict)  # peer -> object name
+    selection: str = None  # the selected object's name, None: nothing
     drags: dict = field(default_factory=dict)  # (peer, gesture id) -> Drag
 
-    def clicked(self, peer, object_name):
-        """A click by `peer` hit `object_name` (None: nothing). Returns the mode it needs:
-        'object' when it now has a selection, 'default' when not."""
-        if object_name is None:
-            self.selected.pop(peer, None)
-            return "default"
-        self.selected[peer] = object_name
-        return "object"
-
-    def wanted_mode(self, peer, aimed_name):
-        """The mode `peer` needs while their ray is on `aimed_name` (None: on nothing Blender
-        picks): 'object' only on their own selection, so a one-hand drag grabs it; 'default'
-        everywhere else, so a drag moves the view."""
-        name = self.selected.get(peer)
-        return "object" if name is not None and aimed_name == name else "default"
+    def aims_at_selection(self, aimed_name):
+        """Whether a ray on `aimed_name` (None: on nothing Blender picks) is on the selection: a
+        one-hand drag starting then grabs it."""
+        return self.selection is not None and aimed_name == self.selection
 
     def dragging(self, peer):
-        """Whether `peer` is moving an object now: their mode is left alone until it ends."""
+        """Whether `peer` is moving an object now: their aim is left alone until it ends."""
         return any(key[0] == peer for key in self.drags)
 
     def drag_started(self, peer, gesture_id, object_world, grabbed_name):
         """A one-hand drag began on `grabbed_name` (what its ray hit, None: nothing); returns the
-        object it moves, or None. Only a drag that grabbed the user's selection moves it: a pinch
-        on a GUI panel or on empty space reaches the volume too and must move nothing."""
-        name = self.selected.get(peer)
+        object it moves, or None. Only a drag that grabbed the selection moves it: a pinch on a GUI
+        panel or on empty space reaches the volume too and must move nothing."""
+        name = self.selection
         if name is None or grabbed_name != name:
             return None
         self.drags[(peer, gesture_id)] = Drag(name, tuple(object_world))
@@ -167,11 +182,11 @@ class Pointing:
         return drag.object_name, drag.object_start if canceled else None, drag.moved
 
     def forget_object(self, object_name):
-        """An object that is gone (deleted, renamed) is nobody's selection any more. Returns the peers
-        that lose their selection, to switch back to the default mode."""
-        peers = [peer for peer, name in self.selected.items() if name == object_name]
-        for peer in peers:
-            del self.selected[peer]
+        """An object that is gone (deleted, renamed) is no selection and no drag's any more. Returns
+        whether it was the selection."""
+        was_selection = self.selection == object_name
+        if was_selection:
+            self.selection = None
         for key in [key for key, drag in self.drags.items() if drag.object_name == object_name]:
             del self.drags[key]
-        return peers
+        return was_selection

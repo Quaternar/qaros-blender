@@ -47,17 +47,24 @@ class LaunchedAddonTests(unittest.TestCase):
         self.assertEqual(prefs.anari_folder, "")
         self.assertEqual(prefs.backend, qaros_anari.BACKEND_AUTOMATIC)
         self.assertEqual(prefs.max_users, 2)
-        self.assertEqual(prefs.fps, 30)
+        self.assertEqual(prefs.render_rate, 30)
 
     def test_1b_controls_panel_settings_read_and_keep_the_defaults(self):
         tabs, panels = qaros_anari.controls_settings()
-        self.assertEqual(tabs, ("object", "material", "frame", "panels"))
+        self.assertEqual(tabs, ("tools", "object", "material", "frame", "panels"))
         self.assertEqual(panels, qaros_anari.blender_panels.DEFAULT_PANELS)
         first = panels[0]
         self.assertEqual(bpy.ops.qaros.toggle_controls_panel(panel=first), {"FINISHED"})
         self.assertNotIn(first, qaros_anari.controls_settings()[1], "a toggle holds for the session")
         self.assertEqual(bpy.ops.qaros.reset_controls_panels(), {"FINISHED"})
         self.assertEqual(qaros_anari.controls_settings()[1], panels)
+
+    def test_1c_the_tool_starts_at_navigation_and_the_headset_changes_it_for_the_session(self):
+        self.assertEqual(qaros_anari.gesture_tool(), qaros_anari.TOOL_NAVIGATE)
+        self.assertEqual(bpy.ops.qaros.set_tool(tool="SELECT"), {"FINISHED"}, "the QAROS tab's buttons")
+        self.assertEqual(qaros_anari.gesture_tool(), "SELECT")
+        qaros_anari.set_gesture_tool(qaros_anari.TOOL_NAVIGATE)  # the Tools tab in the headset
+        self.assertEqual(qaros_anari.gesture_tool(), qaros_anari.TOOL_NAVIGATE)
 
     def test_2_manual_start_reaches_the_library(self):
         with patch.object(qaros_anari.anari, "Library", FakeLibrary):

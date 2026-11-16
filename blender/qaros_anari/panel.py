@@ -123,8 +123,18 @@ class GestureConfiguration(ctypes.Structure):
 
 # QarGestureKind, QarGesturePhase and QarGestureAppTransformMapping values (types.h).
 GESTURE_CLICK, GESTURE_HOVER, GESTURE_ONE_HAND_6DOF = 0, 1, 2
+GESTURE_TWO_HAND_SCALE, GESTURE_TWO_HAND_ROTATE = 3, 4
 PHASE_STARTED, PHASE_UPDATED, PHASE_ENDED, PHASE_INSTANT, PHASE_CANCELED = 0, 1, 2, 3, 4
 MAPPING_NONE, MAPPING_APP_POSE = 0, 1
+SENSITIVITY_CONSTANT = 0
+AXIS_NONE, AXIS_Y, AXIS_ALL = 0, 2, 7
+STRUCTURE_TYPE_GESTURE_MAPPING_RULE = 0x5502
+# QarAppVolumeControllerRayLineStyle values (types.h).
+LINE_NONE, LINE_SOLID, LINE_DOTTED = 0, 1, 2
+# The ray of a pinch that clicks: solid green while the hand pinches and for a moment after the
+# release (QAROS keeps a click's style 0.4 s), then the hover's dotted white again. Brighter than
+# the manipulations' green (0, 200, 0), so a pinch that becomes a drag still darkens.
+CLICK_RAY = (LINE_SOLID, (0, 255, 0, 255))
 
 GESTURE_CALLBACK = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p)
 
@@ -175,6 +185,9 @@ _FUNCTIONS = {
     "qar_impl_app_volume_get_id": (Result, [_P, ctypes.POINTER(Id)]),
     "qar_impl_app_volume_handle_destroy": (None, [_P]),
     "qar_impl_app_volume_get_gesture_configuration": (Result, [_P, ctypes.POINTER(GestureConfiguration)]),
+    "qar_impl_app_volumes_change_gesture_configuration": (Result, [_P, _P, ctypes.POINTER(GestureConfiguration)]),
+    "qar_impl_app_volumes_change_app_pose": (Result, [_P, _P, ctypes.POINTER(Pose)]),
+    "qar_impl_app_volumes_change_app_scale": (Result, [_P, _P, ctypes.c_float]),
     "qar_impl_app_volumes_change_gesture_mode": (Result, [_P, _P, ctypes.c_uint32, ctypes.POINTER(GestureConfiguration)]),
     "qar_impl_app_volumes_remove_gesture_mode": (Result, [_P, _P, ctypes.c_uint32]),
     "qar_impl_app_volumes_select_gesture_mode": (Result, [_P, _P, ctypes.POINTER(Id), ctypes.c_uint32]),
@@ -375,37 +388,84 @@ class ServedPanel:
         return errors
 
 
-# The gesture mode a user is switched to while their ray is on the object they selected: the
-# volume's default mode with a one-hand drag reported instead of moving the app, so the add-on moves
-# the object. Everywhere else the user stays in the default mode, where every gesture moves the view.
-OBJECT_MODE = 1
+MANIPULATION_KINDS = (GESTURE_ONE_HAND_6DOF, GESTURE_TWO_HAND_SCALE, GESTURE_TWO_HAND_ROTATE)
 
 
-def object_mode_from(default):
-    """A copy of the volume's default gesture configuration in which no one-hand drag moves the app.
-    Two-hand scale and rotate keep moving the whole scene."""
+def set_ray(rule, style):
+    """Gives `rule` the ray `style`, (line style, (r, g, b, a))."""
+    line, color = style
+    rule.controller_ray_style.line_style = line
+    for index, channel in enumerate(color):
+        rule.controller_ray_style.color[index] = channel
+
+
+def _copy_rule(target, source):
+    ctypes.memmove(ctypes.byref(target), ctypes.byref(source), ctypes.sizeof(MappingRule))
+
+
+def app_decides_from(default):
+    """A copy of the volume's default gesture configuration in which no gesture moves the app: QAROS
+    reports each one and draws its ray as before, and the add-on decides what it does.
+    Manipulations report hand metres (precision 1, constant sensitivity). A two-hand turn about the
+    vertical is added after the two-hand spread when the default has none (QAROS's does not). A
+    click draws CLICK_RAY; a click rule is added last when the default has none."""
     config = GestureConfiguration()
     ctypes.memmove(ctypes.byref(config), ctypes.byref(default), ctypes.sizeof(GestureConfiguration))
-    for index in range(min(config.mapping_rule_count, MAX_MAPPING_RULES)):
+    count = min(config.mapping_rule_count, MAX_MAPPING_RULES)
+    kinds = [config.mapping_rules[index].gesture_kind for index in range(count)]
+    for index in range(count):
         rule = config.mapping_rules[index]
-        if rule.gesture_kind == GESTURE_ONE_HAND_6DOF:
-            rule.app_transform_mapping = MAPPING_NONE
+        rule.app_transform_mapping = MAPPING_NONE
+        if rule.gesture_kind in MANIPULATION_KINDS:
+            rule.precision = 1.0
+            rule.app_scale_sensitivity_mode = SENSITIVITY_CONSTANT
+        if rule.gesture_kind == GESTURE_CLICK:
+            set_ray(rule, CLICK_RAY)
+    if GESTURE_CLICK not in kinds and count < MAX_MAPPING_RULES:
+        click = config.mapping_rules[count]
+        click.header.type = STRUCTURE_TYPE_GESTURE_MAPPING_RULE
+        click.gesture_kind = GESTURE_CLICK
+        click.enabled = True
+        click.precision = 1.0
+        click.translation_axes = click.rotation_axes = AXIS_ALL
+        click.enable_gestures_from_outside_of_volume = True
+        click.app_transform_mapping = MAPPING_NONE
+        set_ray(click, CLICK_RAY)
+        count += 1
+        config.mapping_rule_count = count
+    if GESTURE_TWO_HAND_ROTATE in kinds or count >= MAX_MAPPING_RULES:
+        return config
+    at = kinds.index(GESTURE_TWO_HAND_SCALE) + 1 if GESTURE_TWO_HAND_SCALE in kinds else 0
+    for index in range(count, at, -1):
+        _copy_rule(config.mapping_rules[index], config.mapping_rules[index - 1])
+    turn = config.mapping_rules[at]
+    if at > 0:
+        _copy_rule(turn, config.mapping_rules[at - 1])  # the spread's ray style and reach
+    turn.gesture_kind = GESTURE_TWO_HAND_ROTATE
+    turn.enabled = True
+    turn.precision = 1.0
+    turn.app_scale_sensitivity_mode = SENSITIVITY_CONSTANT
+    turn.translation_axes = AXIS_NONE
+    turn.rotation_axes = AXIS_Y
+    turn.app_transform_mapping = MAPPING_NONE
+    config.mapping_rule_count = count + 1
     return config
 
 
 class VolumeGestures:
-    """The app volume's gestures for the add-on: subscribes to every gesture and switches users
-    between the default mode and OBJECT_MODE. `handler(event)` runs on a QAR library thread with
-    a plain dict (the gesture handle is only valid during the call)."""
+    """The app volume's gestures for the add-on: while it runs no gesture moves the app (QAROS only
+    reports them, app_decides_from) and the add-on moves the view itself (change_app_transform).
+    `handler(event)` runs on a QAR library thread with a plain dict (the gesture handle is only
+    valid during the call)."""
 
     def __init__(self, runtime, session, volume_id, handler):
         self.runtime = runtime
         self.session = ctypes.c_void_p(session)
         self.volume_id = ctypes.c_void_p(volume_id)
         self.subscription = None
-        self.mode_defined = False
+        self.replaced = None  # the volume's own default configuration, put back by close()
         try:
-            self._define_object_mode()
+            self._take_over_gestures()
             self._subscribe(handler)
         except Exception:
             self.close()
@@ -430,18 +490,18 @@ class VolumeGestures:
             raise QarError("the stream's app volume is not in the session")
         return ctypes.c_void_p(found)
 
-    def _define_object_mode(self):
+    def _take_over_gestures(self):
         handle = self._volume_handle()
         try:
             default = GestureConfiguration()
             self.runtime.call("qar_impl_app_volume_get_gesture_configuration", handle, ctypes.byref(default))
         finally:
             self.runtime.dll.qar_impl_app_volume_handle_destroy(handle)
-        config = object_mode_from(default)
+        config = app_decides_from(default)
         self.runtime.call(
-            "qar_impl_app_volumes_change_gesture_mode", self.session, self.volume_id, OBJECT_MODE, ctypes.byref(config)
+            "qar_impl_app_volumes_change_gesture_configuration", self.session, self.volume_id, ctypes.byref(config)
         )
-        self.mode_defined = True
+        self.replaced = default
 
     def _subscribe(self, handler):
         dll = self.runtime.dll
@@ -474,6 +534,7 @@ class VolumeGestures:
                         "mode": mode.value,
                         "hand": hand.value,
                         "translation": (translation.x, translation.y, translation.z),
+                        "rotation": (rotation.x, rotation.y, rotation.z, rotation.w),
                         "mapped": mapped.value,
                         "start": (start.x, start.y, start.z) if has_start.value else None,
                         "action": (action.x, action.y, action.z) if has_action.value else None,
@@ -497,31 +558,29 @@ class VolumeGestures:
 
     def app_transform(self):
         """(app orientation as x, y, z, w; app scale): how content sits in the volume now."""
+        _position, orientation, scale = self.app_pose()
+        return orientation, scale
+
+    def app_pose(self):
+        """(position, orientation as x, y, z, w, scale): the app transform now."""
         pose = Pose()
         scale = ctypes.c_float()
         self.runtime.call("qar_impl_app_volume_get_latest_app_pose", self.session, self.volume_id, ctypes.byref(pose))
         self.runtime.call("qar_impl_app_volume_get_latest_app_scale", self.session, self.volume_id, ctypes.byref(scale))
-        q = pose.orientation
-        return (q.x, q.y, q.z, q.w), scale.value
+        q, p = pose.orientation, pose.position
+        return (p.x, p.y, p.z), (q.x, q.y, q.z, q.w), scale.value
 
-    def _peer(self, peer_hex):
-        peer = Id()
-        ctypes.memmove(peer.data, bytes.fromhex(peer_hex), ID_LENGTH)
-        return peer
-
-    def select_object_mode(self, peer_hex):
-        self.runtime.call(
-            "qar_impl_app_volumes_select_gesture_mode", self.session, self.volume_id, ctypes.byref(self._peer(peer_hex)), OBJECT_MODE
-        )
-
-    def select_default_mode(self, peer_hex):
-        self.runtime.call(
-            "qar_impl_app_volumes_clear_peer_gesture_mode", self.session, self.volume_id, ctypes.byref(self._peer(peer_hex))
-        )
+    def change_app_transform(self, position, orientation, scale):
+        """Moves the view: every user sees the content at this app pose and scale."""
+        pose = Pose()
+        pose.orientation = Quaternion(*orientation)
+        pose.position = Vector3(*position)
+        self.runtime.call("qar_impl_app_volumes_change_app_pose", self.session, self.volume_id, ctypes.byref(pose))
+        self.runtime.call("qar_impl_app_volumes_change_app_scale", self.session, self.volume_id, ctypes.c_float(scale))
 
     def close(self):
-        """Stops the gestures and leaves the volume as it was: every user in the default mode, the
-        object mode removed. Errors are collected: a closing stream must still release its device."""
+        """Stops the gestures and gives them back to QAROS: the volume's own configuration again.
+        Errors are collected: a closing stream must still release its device."""
         errors = []
         if self.subscription is not None:
             try:
@@ -530,14 +589,15 @@ class VolumeGestures:
                 errors.append(str(error))
             self.runtime.dll.qar_impl_cancel_token_handle_destroy(self.subscription)
             self.subscription = None
-        if self.mode_defined:
-            for name, args in (
-                ("qar_impl_app_volumes_clear_all_peer_gesture_modes", (self.session, self.volume_id)),
-                ("qar_impl_app_volumes_remove_gesture_mode", (self.session, self.volume_id, OBJECT_MODE)),
-            ):
-                try:
-                    self.runtime.call(name, *args)
-                except QarError as error:
-                    errors.append(str(error))
-            self.mode_defined = False
+        if self.replaced is not None:
+            try:
+                self.runtime.call(
+                    "qar_impl_app_volumes_change_gesture_configuration",
+                    self.session,
+                    self.volume_id,
+                    ctypes.byref(self.replaced),
+                )
+            except QarError as error:
+                errors.append(str(error))
+            self.replaced = None
         return errors

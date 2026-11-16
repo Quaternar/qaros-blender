@@ -22,7 +22,8 @@ from .hub_launch import (
     started_by_hub,
     stdin_is_pipe,
 )
-from .controls import Controls
+from .controls import Controls, selected_name
+from .gestures import TOOL_IDS, TOOL_NAVIGATE, TOOLS
 from .protocol import panel_names, toggled_panel
 from .materials import material_descriptions
 from .panel import QarError, Runtime, ServedPanel, VolumeGestures
@@ -68,6 +69,13 @@ VISRTX_PHYSICAL = "physical"
 VISRTX_MATTE = "matte"
 
 
+# qar.renderRate: frames per second per user, in [RENDER_RATE_MIN, RENDER_RATE_MAX]; the device's
+# own default is RENDER_RATE_DEFAULT.
+RENDER_RATE_DEFAULT = 30
+RENDER_RATE_MIN = 1
+RENDER_RATE_MAX = 120
+
+
 class Preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
 
@@ -91,7 +99,17 @@ class Preferences(bpy.types.AddonPreferences):
         default=BACKEND_AUTOMATIC,
     )
     max_users: bpy.props.IntProperty(name="Users", default=2, min=1, max=32)
-    fps: bpy.props.IntProperty(name="Frame rate", description="Stereo pairs per second per user", default=30, min=1, max=90)
+    render_rate: bpy.props.IntProperty(
+        name="Render rate",
+        description=(
+            "Frames per second each user's headset gets. Lower leaves the renderer time for more users; "
+            "scene changes then show later, head motion stays smooth. Applies at once, also while streaming"
+        ),
+        default=RENDER_RATE_DEFAULT,
+        min=RENDER_RATE_MIN,
+        max=RENDER_RATE_MAX,
+        update=lambda prefs, context: STREAMER.apply_render_rate(prefs.render_rate),
+    )
     app_scale: bpy.props.FloatProperty(
         name="Scale", description="Room metres per Blender unit", default=0.25, min=0.001, max=100.0
     )
@@ -120,7 +138,17 @@ class Preferences(bpy.types.AddonPreferences):
         ),
         default=VISRTX_PHYSICAL,
     )
+    tool: bpy.props.EnumProperty(
+        name="Tool",
+        description=(
+            "What hand gestures in the app volume do, for every user; also chosen on the Tools tab of "
+            "the controls panel in the headset. A double tap selects with either tool"
+        ),
+        items=tuple((tool, name, description, index) for index, (tool, name, description) in enumerate(TOOLS)),
+        default=TOOL_NAVIGATE,
+    )
     # What the controls panel in the headset shows (docs/DEVELOPING.md).
+    show_tools_tab: bpy.props.BoolProperty(name="Tools", description="Navigation or Object selection tab", default=True)
     show_object_tab: bpy.props.BoolProperty(name="Object", description="Location, rotation and scale tab", default=True)
     show_material_tab: bpy.props.BoolProperty(name="Material", description="Base colour, roughness and metallic tab", default=True)
     show_frame_tab: bpy.props.BoolProperty(name="Frame", description="Frame and Play tab", default=True)
@@ -137,7 +165,7 @@ class Preferences(bpy.types.AddonPreferences):
         layout.prop(self, "backend")
         row = layout.row()
         row.prop(self, "max_users")
-        row.prop(self, "fps")
+        row.prop(self, "render_rate")
         row.prop(self, "render_scale")
         row = layout.row()
         row.prop(self, "app_scale")
@@ -145,12 +173,13 @@ class Preferences(bpy.types.AddonPreferences):
         row.prop(self, "far")
         layout.prop(self, "ambient")
         layout.prop(self, "visrtx_materials")
+        layout.prop(self, "tool")
         self.draw_controls_panel(layout.box())
 
     def draw_controls_panel(self, box):
         box.label(text="Controls panel in the headset")
         row = box.row(align=True)
-        for name in ("show_object_tab", "show_material_tab", "show_frame_tab", "show_panels_tab"):
+        for name in ("show_tools_tab", "show_object_tab", "show_material_tab", "show_frame_tab", "show_panels_tab"):
             row.prop(self, name, toggle=True)
         if not self.show_panels_tab:
             return
@@ -176,12 +205,33 @@ def controls_settings():
     """(switched-on tabs, chosen panel class names) from the preferences: read every tick."""
     prefs = preferences()
     switches = {
+        "tools": prefs.show_tools_tab,
         "object": prefs.show_object_tab,
         "material": prefs.show_material_tab,
         "frame": prefs.show_frame_tab,
         "panels": prefs.show_panels_tab,
     }
     return tuple(tab for tab, on in switches.items() if on), panel_names(prefs.controls_panels)
+
+
+def gesture_tool():
+    """The Tool preference: read every tick. An id this add-on does not know reads as Navigation."""
+    tool = preferences().tool
+    return tool if tool in TOOL_IDS else TOOL_NAVIGATE
+
+
+def set_gesture_tool(tool):
+    """The Tools tab in the headset chose `tool`: the preference, so Blender's UI shows it too."""
+    prefs = preferences()
+    if prefs.tool == tool:
+        return
+    prefs.tool = tool
+    if bpy.context.preferences.addons.get(__package__) is not None:
+        bpy.context.preferences.is_dirty = True
+    for window in bpy.context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type in ("VIEW_3D", "PREFERENCES"):
+                area.tag_redraw()
 
 
 class QAROS_OT_toggle_controls_panel(bpy.types.Operator):
@@ -196,6 +246,21 @@ class QAROS_OT_toggle_controls_panel(bpy.types.Operator):
         prefs = preferences()
         prefs.controls_panels = toggled_panel(prefs.controls_panels, self.panel)
         context.preferences.is_dirty = True
+        return {"FINISHED"}
+
+
+class QAROS_OT_set_tool(bpy.types.Operator):
+    bl_idname = "qaros.set_tool"
+    bl_label = "Tool"
+    bl_description = "What hand gestures in the app volume do, for every user (also the Tools tab in the headset)"
+    bl_options = {"INTERNAL"}
+
+    tool: bpy.props.EnumProperty(
+        items=tuple((tool, name, description, index) for index, (tool, name, description) in enumerate(TOOLS))
+    )
+
+    def execute(self, context):
+        set_gesture_tool(self.tool)
         return {"FINISHED"}
 
 
@@ -279,6 +344,7 @@ class Streamer:
         self.panel_error = None
         self.targets_parameter = None  # the qar.targets value last given to the device
         self.targets_cache = (0.0, None)  # (read at, SessionTargets or None)
+        self.selection = None  # the object the stream outlines (qar.selection), as last handed over
 
     @property
     def running(self):
@@ -327,7 +393,8 @@ class Streamer:
         # QAROS on this PC by local enrollment.
         device.set(device.handle, "qar.stream", anari.BOOL, 1)
         device.set(device.handle, "qar.maxUsers", anari.INT32, prefs.max_users)
-        device.set(device.handle, "qar.fps", anari.INT32, prefs.fps)
+        # A qaros older than qar.renderRate reports it as unknown and renders at its own 30.
+        device.set(device.handle, "qar.renderRate", anari.FLOAT32, float(prefs.render_rate))
         device.set(device.handle, "qar.renderScale", anari.FLOAT32, render_scale_parameter(prefs.render_scale))
         device.set(device.handle, "qar.appScale", anari.FLOAT32, prefs.app_scale)
         device.set(device.handle, "qar.near", anari.FLOAT32, prefs.near)
@@ -369,10 +436,21 @@ class Streamer:
         # through the worker, so the UI thread never waits for a target's render.
         self.mirror.apply(self.capture.capture(context.evaluated_depsgraph_get(), (), True))
         self.worker = SyncWorker(self.mirror, lambda error: log(f"sync failed: {error!r}"))
+        self.selection = None
+        self.follow_selection()
         self.publish()
         add_handlers()
         bpy.app.timers.register(self.open_panel, first_interval=PANEL_POLL_INTERVAL)
         log(f"streaming '{self.scene_name}': {self.mirror.objects} objects, {self.mirror.triangles} triangles")
+
+    def apply_render_rate(self, rate):
+        """Hands a changed Render rate preference to the running device: every user's next frame
+        renders at it."""
+        if not self.running or self.stopping or self.device is None:
+            return
+        self.device.set(self.device.handle, "qar.renderRate", anari.FLOAT32, float(rate))
+        self.device.commit()
+        log(f"render rate {rate} frames per second per user")
 
     def apply_targets(self, choice):
         """Hands a changed Streams to choice to the running device: its next commit stops the
@@ -438,13 +516,13 @@ class Streamer:
         try:
             self.runtime = Runtime(library)
             self.panel = ServedPanel(self.runtime, session, volume_id, self.volume.name, self.volume.display_name)
-            self.controls = Controls(self.panel, controls_settings)
+            self.controls = Controls(self.panel, controls_settings, gesture_tool, set_gesture_tool)
             log("controls panel opened beside the app volume")
             try:
                 self.controls.attach_gestures(
                     VolumeGestures(self.runtime, session, volume_id, self.controls.receive_gesture)
                 )
-                log("pointing into the app volume selects and moves objects")
+                log("hand gestures in the app volume: Blender moves the view or the selected object, by the tool")
             except (QarError, OSError) as error:
                 # The panel works without it: only picking in the volume is missing.
                 log(f"pointing into the app volume not available: {error}")
@@ -528,6 +606,17 @@ class Streamer:
         self.scene_name = scene.name
         descriptions = material_descriptions(bpy.data.materials) if materials else None
         self.worker.submit(self.capture.capture(depsgraph, dirty, full, descriptions))
+        self.follow_selection()
+
+    def follow_selection(self):
+        """Outlines Blender's selection in the stream, as Blender's viewport outlines it: the
+        selected active object, picked in the headset or in Blender's UI (controls.selected_name).
+        A selection change updates the depsgraph, so every change passes through sync()."""
+        name = selected_name()
+        if name == self.selection:
+            return
+        self.selection = name
+        self.worker.select(name)
 
     def resync(self):
         if self.running:
@@ -536,6 +625,7 @@ class Streamer:
             self.apply_targets(scene_targets(bpy.context.scene))
             depsgraph = bpy.context.evaluated_depsgraph_get()
             self.worker.submit(self.capture.capture(depsgraph, (), True, material_descriptions(bpy.data.materials)))
+            self.follow_selection()
 
     def on_status(self, severity, message):
         if severity in ("fatal", "error", "warning"):
@@ -717,6 +807,16 @@ def draw_streams_to(layout, scene):
         row.label(text=warning, icon="ERROR")
 
 
+def draw_tool(layout):
+    """The tool hand gestures use, as the Tools tab in the headset shows it. Buttons of an operator,
+    not the preference itself: a Blender QAROS started with --addons alone has no preferences entry
+    to draw (preferences())."""
+    current = gesture_tool()
+    row = layout.row(align=True)
+    for tool, name, _description in TOOLS:
+        row.operator(QAROS_OT_set_tool.bl_idname, text=name, depress=tool == current).tool = tool
+
+
 class QAROS_PT_panel(bpy.types.Panel):
     bl_label = "QAROS"
     bl_space_type = "VIEW_3D"
@@ -772,6 +872,8 @@ class QAROS_PT_panel(bpy.types.Panel):
                 row = layout.row()
                 row.alert = True
                 row.label(text="No controls panel (see the console)", icon="ERROR")
+            if STREAMER.controls is not None and STREAMER.controls.gestures is not None:
+                draw_tool(layout)
             layout.operator(QAROS_OT_fit_volume.bl_idname, icon="FULLSCREEN_ENTER")
             draw_streams_to(layout, context.scene)
             layout.operator(QAROS_OT_stop.bl_idname, icon="PAUSE")
@@ -809,6 +911,7 @@ def redraw_panels():
 CLASSES = (
     Preferences,
     QAROS_OT_toggle_controls_panel,
+    QAROS_OT_set_tool,
     QAROS_OT_reset_controls_panels,
     QAROS_OT_start,
     QAROS_OT_stop,
