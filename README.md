@@ -28,7 +28,7 @@ Either way installs the latest [release](https://github.com/Quaternar/qaros-blen
 - **By hand:** download `qaros_blender_anari-<version>.zip` from the
   [latest release](https://github.com/Quaternar/qaros-blender/releases/latest). Blender: **Edit →
   Preferences → Add-ons → Install from Disk**, pick the ZIP, enable **QAROS ANARI Streaming**. Then
-  3D View sidebar (`N`) → **QAROS** tab → **Start streaming**.
+  3D View sidebar (`N`) → **QAROS** tab → **Start Streaming**.
 
 Allow Blender in QAROS the first time it joins.
 

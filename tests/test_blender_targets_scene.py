@@ -77,6 +77,8 @@ class Layout:
     def row(self, **_kwargs):
         return Layout(self.texts)
 
+    column = row
+
     def label(self, text="", icon="NONE"):
         self.texts.append(text)
 

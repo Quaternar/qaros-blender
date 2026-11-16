@@ -25,26 +25,53 @@ flowchart LR
    - **QAROS Visualizer:** the **Blender** tile in Source Applications downloads the latest release of the add-on and starts Blender with it (see [Start Blender from QAROS](#start-blender-from-qaros)).
    - **Install from Disk:** download `qaros_blender_anari-<version>.zip` from this repository's [latest release](https://github.com/Quaternar/qaros-blender/releases/latest) and install it in Blender: **Edit → Preferences → Add-ons**, then **Install from Disk** and pick the ZIP. Enable **QAROS ANARI Streaming**. To update, install a newer ZIP the same way.
 2. Leave **ANARI folder** in the add-on's preferences empty: the add-on then uses the ANARI device QAROS installed.
-3. Optionally choose a **Backend** (see [Backends](#backends)). **Automatic** is right for most PCs.
+3. Optionally choose a **Renderer** in the QAROS tab (see [Backends](#backends)). **Automatic** is right for most PCs.
 
 ## Stream a scene
 
 1. In the 3D View, open the sidebar (`N`) and its **QAROS** tab.
-2. Optionally type an **App volume** name (see [App volume](#app-volume)).
-3. Click **Start streaming**.
+2. Optionally type an **App volume** name (see [App volume](#app-volume)); empty means **Blender**.
+3. Click **Start Streaming**.
 4. The first time, QAROS asks **"Allow Blender to join QAROS?"**: check the publisher and path, then click **Allow** (see [Approved local apps](https://docs.quaternar.com/docs/operator-guide/source-applications#approved-local-apps)). Later starts join at once.
-5. The scene appears in its app volume. Click **Stop streaming** to end it; Blender keeps running.
+5. The scene appears in its app volume. Click **Stop** to end it; Blender keeps running. The refresh button beside **Stop** restarts the stream.
 
-While streaming, the **QAROS** tab shows:
+### The QAROS tab
 
-| Line | Meaning |
+The tab is a panel with collapsible sub-panels, like Blender's own. Hover over a button or field for what it does.
+
+| Panel | What it holds |
 |---|---|
-| status | joining, streaming, or why it stopped |
-| **Backend:** | the backend actually rendering |
-| **Restart Blender to use …** | the Backend preference names another backend than the one loaded |
-| objects, triangles | what is being streamed |
-| material lines | the loaded backend's material support and any approximation (see [Materials](#materials)) |
-| **Streams to** | the devices that get the stream (see [Choose devices](#choose-devices)) |
+| **QAROS** | the status (icon in the header too: unlinked when off, a clock while joining or stopping, linked while streaming, a warning sign on an error), **Start Streaming** or **Stop** and restart, the **App volume** name |
+| **Active Object** | the object Blender's selection makes active, selected in Blender or in the headset (see [Active object](#active-object)); **Select an object** when nothing is |
+| **View** | the [stream shading](#stream-shading) and **Fit Scene to Volume** |
+| **Renderer** | the [backend](#backends) and the settings read when streaming starts (frame rate, resolution, VisRTX materials) |
+| **Streams To** | the devices that get the stream (see [Choose devices](#choose-devices)) |
+| **Headset** | the [tool](#pointing-into-the-volume) hand gestures use, and whether the controls panel opened |
+| **Diagnostics** (closed) | objects and triangles streamed, objects outside the volume, and every material approximation or object left out (also in Blender's console); a warning sign in its header when there is one |
+
+### Active object
+
+**Active Object** follows Blender's selection: click an object in the viewport, the outliner or the headset and the panel shows it.
+
+- The eye button beside its name is the object's **Stream to QAROS** setting: off, the object stays in Blender only and leaves the stream at once. It is saved with the `.blend` and also sits in **Properties → Object → QAROS** (the checkbox in the panel header). Off on an object that instances a collection leaves out the whole instance.
+- The line below says what the stream does with it: streamed, outlined in the headset (the selection), left out, hidden in the viewport, or why it cannot be streamed.
+- Its active material, with the values the stream uses: the Principled BSDF's **Base Color**, **Metallic**, **Roughness** and **Alpha**, or in **Solid** shading the material's **Viewport Color**. A linked input is shown as not streamed.
+- **Transform** (closed) holds location, rotation and scale: what the headset's **Object** tab edits.
+
+### Stream shading
+
+The headsets see the scene shaded like Blender's 3D viewport: switch the viewport's shading (`Z`, or the buttons in its header) and the stream follows within a quarter of a second. The row of buttons in **View** chooses instead: the first (a chain link, **Follow Viewport**, the default) follows the largest 3D viewport; the others fix one shading for the stream whatever the viewport shows. The line below names the shading in use.
+
+| Shading | The stream shows |
+|---|---|
+| **Wireframe** | each mesh's edges as thin light grey lines (a quad shows its four sides), lit by the studio light; the faces are empty |
+| **Solid** | matte surfaces in Blender's solid colour: the material's **Viewport Display → Color** (Blender's default **Material** colour), or the viewport's **Single** colour; grey for faces without a material and for Object, Random, Attribute and Texture colours. Lit by the studio light |
+| **Material Preview** | the exported materials ([Materials](#materials)); the scene's lamps and World only when the viewport's **Scene Lights** and **Scene World** options are on, otherwise the studio light |
+| **Rendered** | the exported materials with the scene's lamps and World (the viewport's own Scene Lights and Scene World options for Rendered, on by default). The stream before this release |
+
+- A change rebuilds the whole scene in the new shading, which takes a moment on a large scene.
+- The studio light is one sun from above and in front, plus the **Ambient light**; Blender's studio lights, MatCaps and HDRI previews are not streamed.
+- Wire width is a thousandth of the scene's size when Wireframe starts.
 
 ### Choose devices
 
@@ -64,13 +91,13 @@ By default the scene streams to every device in QAROS: every headset and every r
 
 ### Start Blender from QAROS
 
-The visualizer's **Blender** tile in [Source Applications](https://docs.quaternar.com/docs/operator-guide/source-applications) starts Blender with the add-on enabled, and the add-on clicks **Start streaming** by itself once Blender has loaded (`QAR_BLENDER_AUTO_START=1`). If that start fails, for example because the first-run approval was declined, it is not repeated: click **Start streaming** yourself.
+The visualizer's **Blender** tile in [Source Applications](https://docs.quaternar.com/docs/operator-guide/source-applications) starts Blender with the add-on enabled, and the add-on clicks **Start Streaming** by itself once Blender has loaded (`QAR_BLENDER_AUTO_START=1`). If that start fails, for example because the first-run approval was declined, it is not repeated: click **Start Streaming** yourself.
 
 You can also add Blender to the visualizer's [Source Applications](https://docs.quaternar.com/docs/operator-guide/source-applications) and start it from there:
 
 1. Switch the visualizer to the **Developer** UI mode (Settings).
 2. **+ Add source app** → **QAROS API app**, **Executable** `blender.exe` (for example `C:\Program Files\Blender Foundation\Blender 4.5\blender.exe`). **Arguments** are passed to Blender, one per line, for example a `.blend` file to open.
-3. Launch the new tile, then click **Start streaming** in the add-on.
+3. Launch the new tile, then click **Start Streaming** in the add-on.
 
 **Stop** in the visualizer quits that Blender at once, without a save prompt. Blender saves the session to `quit.blend` first: **File → Recover → Last Session** brings unsaved work back. A Blender you started yourself is never closed by QAROS.
 
@@ -83,11 +110,11 @@ The scene streams into one app volume. Its name is the **App volume** field in t
 | empty (default) | **Blender**, or **Blender 2**, **Blender 3**, … when another Blender on this PC already shows one; the tab says which |
 | a name | that volume only; if another Blender already shows it, streaming does not start and the tab asks for another name |
 
-Change the name while stopped: **Stop streaming**, edit, **Start streaming**. Move, rotate and scale the volume like any other app volume.
+Change the name while stopped: **Stop**, edit, **Start Streaming**. Move, rotate and scale the volume like any other app volume.
 
-**Moving the content is a view change.** Moving, turning or scaling the scene in its volume (gestures in a headset, the Visualizer's mouse, **Fit scene to volume**) moves every user's camera over the scene: Blender's objects, and so its file and undo history, stay as they are. Only edits made on purpose change the scene: the panel's sliders, and the gestures of the **Object selection** tool (below).
+**Moving the content is a view change.** Moving, turning or scaling the scene in its volume (gestures in a headset, the Visualizer's mouse, **Fit Scene to Volume**) moves every user's camera over the scene: Blender's objects, and so its file and undo history, stay as they are. Only edits made on purpose change the scene: the panel's sliders, and the gestures of the **Object selection** tool (below).
 
-- **Placement:** the world origin of the scene sits at the centre of the app volume. Blender's Z-up becomes the room's up. **Fit scene to volume** (QAROS tab) places and scales the scene to fill the volume instead; it is not repeated when the scene changes.
+- **Placement:** the world origin of the scene sits at the centre of the app volume. Blender's Z-up becomes the room's up. **Fit Scene to Volume** (QAROS tab) places and scales the scene to fill the volume instead; it is not repeated when the scene changes.
 - **Size:** **Scale** (preferences) is room metres per Blender unit, 0.25 by default: a 4 m Blender scene fills a 1 m volume. It applies when the volume is first created. A volume that already exists keeps its own scale and position, including changes made in the room, across Blender restarts; to start over with the preference, stream into a new **App volume** name.
 - **Outside the volume:** objects whose bounds lie entirely outside the app volume are not streamed. They come back as soon as the volume moves or grows to include them.
 
@@ -106,13 +133,14 @@ While streaming, every user sees a **Blender** panel beside the app volume. It e
 - Undo and redo buttons on the panel; a released slider drag is one undo step in Blender.
 - Name, Parent and Parent Bone are typed on the headset's virtual keyboard; file paths stay read-only.
 - Several users editing the same value: the last edit wins.
-- **Show in the headset** in the QAROS tab hides or shows the panel. Which tabs and which Blender panels it offers is set in the add-on's preferences (**Controls panel in the headset**); a hidden tab's edits are refused.
+- Which tabs and which Blender panels the controls panel offers is set in the add-on's preferences (**Controls panel in the headset**); a hidden tab's edits are refused. The QAROS tab's **Headset** panel says whether it opened.
 - When QAROS cannot show the panel, streaming goes on without it and the tab says **No controls panel**.
 
 ### Pointing into the volume
 
-The tool decides what a gesture does. Choose it on the panel's **Tools** tab, or in the QAROS tab
-and the add-on's preferences (**Tool**); all three show the same tool, which holds for every user.
+The tool decides what a gesture does. Choose it on the panel's **Tools** tab, or in the QAROS tab's
+**Headset** panel and the add-on's preferences (**Tool**); all three show the same tool, which holds
+for every user.
 
 | Gesture | Navigation (the default) | Object selection |
 |---|---|---|
@@ -159,27 +187,31 @@ Blender's own **File → Import → Universal Scene Description** gets the first
 | **Helide** | CPU | simple reference shading; no transparency | a few fps | checking a result against a second renderer |
 | **VisRTX** (NVIDIA, where installed) | NVIDIA RTX GPU | ray traced, with shadows; metallic, roughness and emission with grain in a moving view, or smooth matte (**VisRTX materials**) | 30 fps for the cube scene | comparing with a ray tracer |
 
+- Choose it with **Renderer** in the QAROS tab (or the add-on's preferences); each entry's tooltip says what it is for.
 - **Automatic** (default) uses the first of VisGL, VisRTX, OSPRay and Helide that starts on this PC: VisGL first, for its physically based materials without grain. A QAROS whose ANARI device does not know this order yet starts with VisRTX instead; choose **VisGL** to be sure.
+- **A change applies at once:** while streaming, choosing another renderer restarts the stream on it (Stop, then Start, into the same app volume; users see the scene again after a moment). While QAROS still answers the first join, it applies at the next **Start**, and the **Renderer** panel says **Renderer: restart to apply** with a restart button. Stopped, it applies at the next **Start**.
+- The **Renderer** panel names the backend rendering and its material model while streaming. A renderer that is not installed or does not start on this PC fails the start with the reason in the status line; choose another.
+- There is no Vulkan ANARI renderer. VisGL renders with OpenGL and writes its frames straight into the stream's Vulkan images on the GPU.
 - The CPU backends render at half the headset's resolution per side by default and are upscaled; see **Render scale** below.
-- A stream that keeps every CPU core busy runs on OSPRay or Helide, not on VisGL: check the **Backend:** line.
-- **Backend** and **ANARI folder** take effect only when Blender restarts. The tab says when the loaded backend differs from the preference.
+- A stream that keeps every CPU core busy runs on OSPRay or Helide, not on VisGL: check the **Renderer** panel.
+- **ANARI folder** takes effect only when Blender restarts; the **Renderer** panel says so when it was changed.
 
 ## Preferences
 
-**Edit → Preferences → Add-ons → QAROS ANARI Streaming**:
+**Edit → Preferences → Add-ons → QAROS ANARI Streaming**. **Render rate**, **Render scale** and **VisRTX materials** are also in the QAROS tab's **Renderer** panel when Blender's preferences list the add-on (not in a Blender QAROS started with the add-on for that session only):
 
 | Setting | Default | Meaning | Applies |
 |---|---|---|---|
 | **ANARI folder** | empty | folder with `anari.dll` and `anari_library_qaros.dll`; empty uses the ANARI device of the QAROS that started Blender, else the installed one on the system `PATH` | after a Blender restart |
-| **Backend** | Automatic | the renderer, see [Backends](#backends) | after a Blender restart |
+| **Renderer** | Automatic | the backend, see [Backends](#backends); also in the QAROS tab | next start; the QAROS tab restarts a running stream |
 | **Users** | 2 | how many headsets and visualizers can watch at once | next start |
 | **Render rate** | 30 | frames per second each user's headset gets (1 to 120). Lower leaves the renderer time for more users and the CPU backends; changes to the scene then show later, while head motion stays smooth (the headset warps the newest frame). A QAROS older than this setting ignores it and renders at 30 | at once |
 | **Render scale** | 0 | share of the headset's resolution each eye renders at, upscaled for the headset: 0 is automatic (half on OSPRay and Helide, full on VisGL), otherwise 0.25 to 1. Below full resolution the status ends with the share in use, for example "at 50 % resolution" | next start |
 | **Scale** | 0.25 | room metres per Blender unit | when the app volume is created ([App volume](#app-volume)) |
 | **Near**, **Far** | 0.1, 100 | depth range in Blender units; content outside it is not drawn | next start |
 | **Ambient light** | 0.3 | constant light on faces that no lamp reaches | next start |
-| **VisRTX materials** | Physically based (metal, grain) | on VisRTX: **Physically based** shows metal, highlights and emission, with grain on faces lit by the ambient light in a moving view; **Matte (smooth)** streams colour only, without grain | next start |
-| **Tool** | Navigation | what hand gestures in the app volume do ([Pointing into the volume](#pointing-into-the-volume)); also chosen on the panel's **Tools** tab and in the QAROS tab | at once |
+| **VisRTX materials** | Physically based (metal, grain) | on VisRTX: **Physically based** shows metal, highlights and emission, with grain on faces lit by the ambient light in a moving view; **Matte (smooth)** streams colour only, without grain. Also in the QAROS tab's **Renderer** panel | next start, or the panel's restart button |
+| **Tool** | Navigation | what hand gestures in the app volume do ([Pointing into the volume](#pointing-into-the-volume)); also chosen on the panel's **Tools** tab and in the QAROS tab's **Headset** panel | at once |
 | **Controls panel in the headset** | every tab; Transform, Relations, Visibility | which tabs the [controls panel](#controls-panel-in-the-headset) shows, and the Blender panels on its **Panels** tab (**Default panels** restores them) | at once |
 
 ## Materials
@@ -202,7 +234,7 @@ What each backend shows:
 | Metallic, Roughness, Emission | yes | no (matte) | yes | yes, or no with **VisRTX materials** Matte |
 | Alpha | yes | yes | no (opaque) | yes |
 
-- **Material with nodes off,** or a shader other than a Principled BSDF (mix shaders, groups): the viewport display colour and alpha, with a note in the tab.
+- **Material with nodes off,** or a shader other than a Principled BSDF (mix shaders, groups): the viewport display colour and alpha, with a note in **Diagnostics**.
 - **Lights:** a sun stays a sun; point, spot and area lamps become point lights. A scene without lamps gets one sun. **Ambient light** lights the faces lamps miss.
 - **World:** an **Environment Texture** (equirectangular image, for example an HDRI) on the World's **Background**, with its **Strength** and the rotation of a **Mapping** node, or the Background's plain colour, becomes an environment light that lights and reflects in the scene without being drawn behind it. Only a backend that can light with an environment it does not draw gets it; today none of the shipped ones can (VisGL has no environment light, OSPRay's streaming renderer ignores it, VisRTX draws it behind the scene), so metal reflects only the lamps and the ambient light. The World is then left out without a message; the console says `world: not streamed`.
 - **Not streamed:** image and procedural textures, vertex colours, normal and bump maps, transmission and glass, coat, sheen, subsurface and the other advanced Principled inputs.
@@ -212,15 +244,17 @@ What each backend shows:
 
 | What you see | Do this |
 |---|---|
-| Nothing happens after **Start streaming** | Answer the **Allow Blender to join QAROS?** prompt (tray window, or the visualizer's **Source Applications** panel). An unanswered prompt expires after 120 s. |
-| Start fails, no backend loads | Check that QAROS was installed with the **ANARI device** component and leave **ANARI folder** empty. Restart Blender after changing it. |
-| The stream is slow and all CPU cores are busy | The scene runs on OSPRay or Helide. Choose **VisGL** under **Backend** and restart Blender. |
-| Metallic, roughness or emission have no effect | The tab says **Backend uses a matte approximation** (OSPRay, or VisRTX with **VisRTX materials** Matte). Use VisGL, or set **VisRTX materials** to Physically based. |
+| Nothing happens after **Start Streaming** | Answer the **Allow Blender to join QAROS?** prompt (tray window, or the visualizer's **Source Applications** panel). An unanswered prompt expires after 120 s. |
+| Start fails, no backend loads | Check that QAROS was installed with the **ANARI device** component and leave **ANARI folder** empty. Restart Blender after changing it. A **Renderer** that is not installed fails too: choose **Automatic**. |
+| The stream is slow and all CPU cores are busy | The scene runs on OSPRay or Helide. Choose **VisGL** under **Renderer**. |
+| The headsets show only grey or only lines | The 3D viewport is in **Solid** or **Wireframe** shading and the stream follows it ([Stream shading](#stream-shading)). Switch the viewport to **Material Preview** or **Rendered**, or choose **Rendered** in the QAROS tab's **View** panel. |
+| An object is missing in the headset only | Its **Stream to QAROS** is off: the eye in **Active Object**, or **Properties → Object → QAROS**. |
+| Metallic, roughness or emission have no effect | The stream is in **Solid** shading, or **Diagnostics** says **Backend uses a matte approximation** (OSPRay, or VisRTX with **VisRTX materials** Matte). Use Material Preview or Rendered shading, VisGL, or set **VisRTX materials** to Physically based. |
 | Metal looks matte compared with Blender's viewport | Blender's **Material Preview** lights metal with a studio HDRI; the stream has no environment to reflect. Add lamps where the reflections should come from. |
 | Grain on VisRTX | Physically based materials on VisRTX sample the ambient light at random. Set **VisRTX materials** to Matte, or use VisGL. |
 | Editing a Principled node changes nothing | Make sure it feeds **Surface** of the active **Material Output** (target **All**); unconnected nodes are ignored. Set the value directly on the node instead of linking it. |
 | A colour turns into the viewport colour | The input is linked to a node or texture. Set a constant value. |
-| Alpha stays opaque | The tab says **Backend lacks alpha blending** (Helide). Use VisGL or OSPRay. |
+| Alpha stays opaque | **Diagnostics** says **Backend lacks alpha blending** (Helide). Use VisGL or OSPRay. |
 | Part of the scene is missing | It lies outside the app volume or beyond **Far**. Move or scale the volume, or change **Scale** or **Far**. |
 | The scene is tiny or huge | The app volume kept the scale it had from earlier. Stream into a new **App volume** name after setting **Scale** (room metres per Blender unit). |
 | A headset or Visualizer receiver shows nothing | **Streams to** in the QAROS tab: tick the device, or **All devices**. With more devices than **Users** (preferences), only that many get the stream. |
@@ -232,6 +266,6 @@ What each backend shows:
 - **Large edits cost time in Blender:** a changed object is sent again in full, so editing a very large mesh is slower while streaming.
 - **Moving many objects at once is slower:** objects in motion are drawn one by one until they rest for about 2 s.
 - **Geometry:** meshes, and curves and volumes as far as they convert to a mesh.
-- **Gaussian splats and point clouds are not streamed.** This covers point cloud and Gaussian splat objects (Blender 5.3 and later) and meshes with vertices but no faces, such as a 3DGS PLY imported as loose vertices in Blender 5.2 or earlier. The tab lists each as **'name': Gaussian splats and point clouds are not streamed** (**'name': has no faces: not streamed** for other meshes without faces), and the same line is written once per object to Blender's console as `[qaros-anari] ...`. **Fit scene to volume** leaves them out, so it frames only what is streamed.
+- **Gaussian splats and point clouds are not streamed.** This covers point cloud and Gaussian splat objects (Blender 5.3 and later) and meshes with vertices but no faces, such as a 3DGS PLY imported as loose vertices in Blender 5.2 or earlier. **Diagnostics** and **Active Object** list each as **'name': Gaussian splats and point clouds are not streamed** (**'name': has no faces: not streamed** for other meshes without faces), and the same line is written once per object to Blender's console as `[qaros-anari] ...`. **Fit Scene to Volume** leaves them out, so it frames only what is streamed.
 - **One app volume per Blender,** placed at the scene's world origin; no camera, collection or origin object is used to place it.
 - Windows only.
