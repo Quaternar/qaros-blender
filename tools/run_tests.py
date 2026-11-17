@@ -39,11 +39,13 @@ UNIT = ["test_blender_helper.py", "test_blender_hub_launch.py", "test_blender_an
         "test_release_package.py", "test_blender_support.py"]
 BLENDER = ["test_blender_panel_replay.py", "test_blender_pointing_scene.py", "test_blender_usd_import.py",
            "test_blender_addon_launch.py", "test_blender_splats.py",
-           "test_blender_targets_scene.py", "test_blender_selection_outline.py", "test_blender_tab.py"]
+           "test_blender_targets_scene.py", "test_blender_selection_outline.py", "test_blender_tab.py",
+           "test_blender_timer_operators.py"]
 # Plain Python driving Blender processes of its own (--blender).
 BLENDER_DRIVER = ["test_blender_addon_install.py"]
 DEVICE_PYTHON = ["test_blender_addon_binding.py"]
-DEVICE_BLENDER = ["test_blender_addon_sync.py", "test_blender_usd_scene.py"]
+DEVICE_BLENDER = ["test_blender_addon_sync.py", "test_blender_usd_scene.py",
+                  "test_blender_renderer_switch.py"]
 
 
 def installed_anari_folder():

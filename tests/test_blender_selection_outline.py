@@ -155,6 +155,34 @@ class StreamerSelectionTests(unittest.TestCase):
         after = [event for event in self.device.events if event[0] == "device"]
         self.assertEqual(after, before, "a move of the selected object keeps the parameter")
 
+    def test_a_models_root_outlines_every_part_below_it(self):
+        """A root empty has no geometry: selecting it names the ids of its parts (children and
+        grandchildren), so the stream outlines the whole model."""
+        root = bpy.data.objects.new("ModelRoot", None)
+        bpy.context.scene.collection.objects.link(root)
+        parts = []
+        for index in range(2):
+            bpy.ops.mesh.primitive_cube_add(location=(5.0 + 3.0 * index, 0.0, 0.0))
+            part = bpy.context.active_object
+            part.parent = root
+            parts.append(part)
+        deep = bpy.data.objects.new("DeepPart", parts[1].data)
+        bpy.context.scene.collection.objects.link(deep)
+        deep.parent = parts[1]
+        self.settle()
+        controls.select_only("ModelRoot", with_children=True)
+        self.settle()
+        ids = {str(self.device.instance_id(self.instance_of(part.name))) for part in (*parts, deep)}
+        self.assertEqual(len(ids), 3, "every part has its own id")
+        root_id = str(self.streamer.mirror.object_id("ModelRoot"))  # names no instance: nothing to draw
+        self.assertEqual(set(self.device.selection.split(",")), ids | {root_id})
+        self.assertNotIn(("ModelRoot", 0), self.streamer.mirror.instance_slots, "the root draws nothing")
+        self.select("Cube")
+        self.assertEqual(len(self.device.selection.split(",")), 1, "a part-free object is outlined alone")
+        self.assertTrue(controls.outlined_names("ModelRoot")[0] == "ModelRoot")
+        self.assertEqual(set(controls.outlined_names("ModelRoot")), {"ModelRoot", *(p.name for p in parts), "DeepPart"})
+        self.assertEqual(controls.outlined_names(None), ())
+
 
 class MirrorSelectionTests(unittest.TestCase):
     """SceneMirror.select on a scene of merged objects."""
@@ -194,6 +222,17 @@ class MirrorSelectionTests(unittest.TestCase):
         selection_set = self.device.events.index(("device", "qar.selection", str(object_id)))
         self.assertLess(world_commit, selection_set)
         self.assertEqual(self.device.events[-1], ("commit", self.device.handle))
+
+    def test_several_selected_objects_are_named_together_and_all_leave_their_chunks(self):
+        self.assertTrue(self.mirror.select(("Object 3", "Object 4"), now=100.0))
+        ids = [str(self.device.instance_id(self.mirror.instance_slots[(name, 0)][0]))
+               for name in ("Object 3", "Object 4")]
+        self.assertEqual(self.device.selection, ",".join(ids))
+        self.assertNotIn("Object 3", self.mirror.batched)
+        self.assertNotIn("Object 4", self.mirror.batched)
+        self.assertFalse(self.mirror.select(("Object 3", "Object 4"), now=100.0))
+        self.assertTrue(self.mirror.select("Object 3", now=100.0), "a smaller selection is a change")
+        self.assertEqual(self.device.selection, ids[0])
 
     def test_a_deselected_object_merges_again(self):
         self.mirror.select("Object 3", now=100.0)

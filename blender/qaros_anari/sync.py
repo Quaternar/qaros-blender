@@ -602,7 +602,7 @@ class SceneMirror:
         # The selection outline: every instance of an object carries the object's ANARI `id`, the
         # same for the whole session, and qar.selection names the selected object's.
         self.object_ids = {}  # object name -> id of its instances
-        self.selected = None  # object name the stream outlines, or None
+        self.selected = ()  # names of the objects the stream outlines (a model: its root and parts)
         self.wire_radius = 0.01  # Wireframe shading: the wires' radius in the scene's units
 
     @property
@@ -748,7 +748,7 @@ class SceneMirror:
     def mergeable(self, name, count):
         parts = self.parts.get(name)
         return (count == 1 and bool(parts) and name not in self.batched and name not in self.dynamic
-                and name != self.selected)
+                and name not in self.selected)
 
     def update_batches(self, counts, transforms, now):
         """Batched objects that moved, changed shape or gained instances leave their chunk and stay
@@ -757,7 +757,7 @@ class SceneMirror:
         for name, (_chunk, transform) in list(self.batched.items()):
             moved = counts.get(name) != 1 or transforms[name] != transform
             # The selected object needs an instance of its own: a chunk's instance has no one id.
-            if moved or name == self.selected:
+            if moved or name in self.selected:
                 self.leave_batch(name)
                 if moved and name in counts:
                     self.dynamic[name] = now
@@ -1000,16 +1000,18 @@ class SceneMirror:
         return self.object_ids[name]
 
     def selection_parameter(self):
-        """qar.selection for the selected object: its id, or empty for none."""
-        return str(self.object_id(self.selected)) if self.selected is not None else ""
+        """qar.selection for the selected objects: their ids separated by commas, or empty for none."""
+        return ",".join(str(self.object_id(name)) for name in self.selected)
 
-    def select(self, name, now=None):
-        """Outlines `name` (None: nothing) in the stream. A batched object first leaves its chunk,
-        so it is drawn by an instance with its own id; the world is committed before the device
-        names that id. True when the selection changed."""
-        if name == self.selected:
+    def select(self, names, now=None):
+        """Outlines `names` (None: nothing; one name; or several, a model's root and its parts) in
+        the stream. A batched object first leaves its chunk, so it is drawn by an instance with its
+        own id; the world is committed before the device names the ids. True when the selection
+        changed."""
+        names = () if names is None else ((names,) if isinstance(names, str) else tuple(names))
+        if names == self.selected:
             return False
-        self.selected = name
+        self.selected = names
         if self.place(self.captured, time.monotonic() if now is None else now):
             self.device.commit(self.world)
         self.device.set(self.device.handle, "qar.selection", anari.STRING, self.selection_parameter())
@@ -1112,10 +1114,11 @@ class SyncWorker:
             self.pending = snapshot if self.pending is None else self.pending.absorb(snapshot)
             self.condition.notify_all()
 
-    def select(self, name):
-        """Outlines `name` (None: nothing) once the snapshots submitted before are applied."""
+    def select(self, names):
+        """Outlines `names` (None: nothing; a name or several) once the snapshots submitted before
+        are applied."""
         with self.condition:
-            self.selection = name
+            self.selection = names
             self.condition.notify_all()
 
     def take_failure(self):
