@@ -13,7 +13,7 @@ import time
 import bpy
 from bpy.app.handlers import persistent
 
-from . import anari, blender_panels, shading, targets, usd_import
+from . import anari, blender_panels, blender_support, shading, targets, usd_import
 from .hub_launch import (
     AutoStartOnce,
     StopRequestWatcher,
@@ -1481,6 +1481,11 @@ def unregister_properties():
 
 
 def register():
+    if not blender_support.supported(bpy.app.version):
+        # Blender 5.3 crashes with the add-on: refuse before anything is registered.
+        message = blender_support.unsupported_message(bpy.app.version)
+        print(message, file=sys.stderr)
+        raise RuntimeError(message)
     for cls in CLASSES:
         bpy.utils.register_class(cls)
     usd_import.register()

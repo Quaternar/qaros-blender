@@ -78,6 +78,7 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(asset["app_version"], version)
             self.assertTrue(re.match(r"^\d+\.\d+\.\d+$", asset["min_qaros_version"]))
             self.assertEqual(asset["min_blender_version"], ".".join(map(str, package_release.bl_info()["blender"])))
+            self.assertEqual(asset["max_blender_version"], "5.2.99")
             self.assertEqual(asset["addon_module"], "qaros_anari")
 
 

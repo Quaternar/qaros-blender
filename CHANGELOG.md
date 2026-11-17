@@ -8,6 +8,12 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ## [Unreleased]
 
+### Fixed
+
+- Blender 5.3 crashes with the add-on (an access violation in the GPU driver's OpenGL library), so the supported range is Blender 4.5 to 5.2. On Blender 5.3
+  or newer the add-on refuses to start and says why, and `manifest.json` names the newest Blender
+  (`max_blender_version`) so the QAROS Visualizer's Blender tile does not offer it.
+
 ## [0.5.0] - 2026-11-17
 
 ### Added
