@@ -145,14 +145,14 @@ for every user.
 | Gesture | Navigation (the default) | Object selection |
 |---|---|---|
 | Click an object | nothing | selects it and makes it active |
-| Double tap an object (two clicks of one hand within half a second) | selects it and makes it active | selects it and makes it active |
+| Double tap an object (two clicks of one hand within half a second) | selects its whole model (the top of its parent chain) and makes it active | selects its whole model and makes it active |
 | One-hand drag | pans the view (the scene in its volume) | moves the selected object, when the drag starts on it |
 | Two hands apart or together | zooms the view about the volume's centre | scales the selected object about its origin |
 | Two hands turning | turns the view about the volume's centre | turns the selected object about its origin, around the vertical |
 
 - Selecting picks with Blender's own ray cast against the scene, along the hand's ray. The object
   becomes Blender's selected and active object: the viewport and outliner show it, and the panel
-  shows its values. A child moves in world space and keeps its parent; a collection instance
+  shows its values. A double tap takes the whole model: a glTF that imports as an empty with child parts selects the empty, and moving it moves every part (the parts show selected in Blender). A click with **Object selection** takes the single part it hits. A child moves in world space and keeps its parent; a collection instance
   selects and moves the object that instances it.
 - A click or double tap on empty space keeps the selection: a pinch on the panel itself must not
   take its object away. Deselect in Blender.

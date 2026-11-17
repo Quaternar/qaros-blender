@@ -23,6 +23,7 @@ from .hub_launch import (
     stdin_is_pipe,
 )
 from .controls import Controls, selected_name
+from .controls import _window_override as controls_window_override
 from .gestures import TOOL_IDS, TOOL_NAVIGATE, TOOLS
 from .protocol import panel_names, toggled_panel
 from .materials import material_descriptions, principled_shader
@@ -1583,10 +1584,10 @@ def auto_start_streaming():
     if not AUTO_START.take(STREAMER.running):
         return None
     log("QAROS started Blender to stream: starting streaming")
-    windows = list(bpy.context.window_manager.windows)
+    override = controls_window_override()
     try:
-        if windows:
-            with bpy.context.temp_override(window=windows[0]):
+        if override is not None:
+            with bpy.context.temp_override(**override):
                 bpy.ops.qaros.start_streaming("EXEC_DEFAULT")
         else:
             bpy.ops.qaros.start_streaming("EXEC_DEFAULT")

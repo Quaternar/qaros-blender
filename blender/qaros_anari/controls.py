@@ -42,12 +42,35 @@ def log(text):
     print(f"[qaros-anari] {text}", flush=True)
 
 
+def _usable_window(window):
+    """Whether operators can run in `window` now: a real window with a screen of areas, not a
+    temporary one (a file browser, a preferences window that is opening or closing) and with no
+    modal operator (an import, a transform) in it."""
+    screen = window.screen
+    if screen is None or screen.is_temporary or len(screen.areas) == 0:
+        return False
+    return len(getattr(window, "modal_operators", ())) == 0
+
+
 def _window_override():
-    """What an operator run from a timer needs: a window and its screen."""
-    window = bpy.context.window_manager.windows[0] if bpy.context.window_manager.windows else None
-    if window is None:
+    """What an operator run from a timer needs, built fresh on every call (never kept: a window,
+    area or region the user closes or that Blender replaces would leave the override pointing at
+    freed memory, and an operator that reads it crashes Blender): a usable window, its screen and,
+    where it has one, a 3D view area with its main region. None when no window is usable now."""
+    manager = bpy.context.window_manager
+    windows = [window for window in manager.windows if _usable_window(window)]
+    if not windows:
         return None
-    return {"window": window, "screen": window.screen}
+    window = windows[0]
+    override = {"window": window, "screen": window.screen}
+    for area in window.screen.areas:
+        if area.type != "VIEW_3D":
+            continue
+        for region in area.regions:
+            if region.type == "WINDOW":
+                override.update(area=area, region=region)
+                return override
+    return override
 
 
 def _principled(obj):
@@ -139,7 +162,7 @@ def apply_set(edit):
 def run_call(name):
     override = _window_override()
     if override is None:
-        raise RuntimeError("no Blender window")
+        raise RuntimeError("no Blender window ready (an import or a dialog is open)")
     with bpy.context.temp_override(**override):
         if name == "undo":
             bpy.ops.ed.undo()
@@ -150,11 +173,15 @@ def run_call(name):
 
 
 def push_undo():
+    """One undo step for what the panel or a gesture changed. False when no window can take it now
+    (a modal operator such as a viewport move runs, a file browser is open): the caller tries again on
+    its next tick, because an undo push made then reads a context that is being replaced."""
     override = _window_override()
     if override is None:
-        return
+        return False
     with bpy.context.temp_override(**override):
         bpy.ops.ed.undo_push(message=UNDO_LABEL)
+    return True
 
 
 def pick(origin, direction):
@@ -190,10 +217,38 @@ def _same_matrix(a, b):
     return all(abs(x - y) <= INSTANCE_MATRIX_TOLERANCE for row_a, row_b in zip(a, b) for x, y in zip(row_a, row_b))
 
 
-def select_only(name):
+def ancestors(obj):
+    """The parent chain of `obj`, nearest first (a parent loop, which Blender forbids, ends it)."""
+    chain = []
+    while obj.parent is not None and obj.parent not in chain and len(chain) < 1000:
+        obj = obj.parent
+        chain.append(obj)
+    return chain
+
+
+def root_of(name):
+    """The top-most object of the parent chain of `name` (`name` itself with no parent), or `name`
+    when the object is gone. A model imported as a root with child parts is moved as a whole by its
+    root."""
+    obj = bpy.data.objects.get(name)
+    if obj is None:
+        return name
+    chain = ancestors(obj)
+    return chain[-1].name if chain else name
+
+
+def within(name, top):
+    """Whether object `name` is `top` or below it in the parent chain."""
+    obj = bpy.data.objects.get(name)
+    return obj is not None and (name == top or any(parent.name == top for parent in ancestors(obj)))
+
+
+def select_only(name, with_children=False):
     """Makes `name` the one selected and active object, as a click in the viewport does: the
     controls panel then shows it, the gestures of Object selection move it, and Blender's own UI
-    shows it selected at once."""
+    shows it selected at once. `with_children` also highlights everything below it in Blender's
+    viewport and outliner; the active object, which moves, stays `name`. Data API only: an operator
+    run from a timer reads a context that may be changing."""
     layer = bpy.context.view_layer
     obj = layer.objects.get(name)
     if obj is None:
@@ -202,6 +257,10 @@ def select_only(name):
         if other.select_get():
             other.select_set(False)
     obj.select_set(True)
+    if with_children:
+        for child in obj.children_recursive:
+            if child.name in layer.objects:
+                child.select_set(True)
     layer.objects.active = obj
     redraw_desktop()
 
@@ -263,6 +322,7 @@ class Controls:
         self.last_panels = None
         self.exposed = {}  # field id -> field of the last replay: what a prop edit is checked against
         self.ticks = 0
+        self.undo_pending = False  # an undo step wanted, waiting for a window that can take it
         self.closed = False
         self.gestures = None  # VolumeGestures, once attached
         self.hovers = {}  # (peer, hand) -> (monotonic time, action point): written on QAR's thread
@@ -389,7 +449,7 @@ class Controls:
                 repost = True  # the page shows a value Blender did not take: show it Blender's
             final = final or edit.final
         if final:
-            push_undo()
+            self.undo_pending = True
         for item in others:
             if isinstance(item, ToolSet):
                 self.write_tool(item.tool)
@@ -404,12 +464,14 @@ class Controls:
         for item in others:
             if isinstance(item, tuple) and item[0] == "gesture":
                 if self.gesture(item[1]):
-                    push_undo()  # a released drag of an object is one undo step
+                    self.undo_pending = True  # a released drag of an object is one undo step
                 repost = True
             elif isinstance(item, Hello):
                 repost = True
             elif isinstance(item, Call):
                 self.call(item)
+        if self.undo_pending and push_undo():
+            self.undo_pending = False
         self.post_state(tabs, force=repost)
         self.ticks += 1
         if sets or others or repost or self.ticks % PANELS_EVERY == 0:
@@ -510,7 +572,13 @@ class Controls:
         hand's latest hover. None when nothing."""
         hover = self.recent_hover(peer, event.get("hand"), event.get("start"))
         ray = pointing.click_ray(event, hover)
-        return pick(*ray) if ray is not None else None
+        return self.grab_hit(pick(*ray)) if ray is not None else None
+
+    def grab_hit(self, name):
+        """A hit on a part of the selected model counts as a hit on the selection, which is the
+        root of the model: dragging a part moves the whole model."""
+        selection = self.pointing.selection
+        return selection if name is not None and selection and within(name, selection) else name
 
     def follow_hovers(self):
         """Whether each user points at the selection, by their latest hover: a one-hand drag
@@ -527,7 +595,7 @@ class Controls:
                 continue
             self.hovers_followed[peer] = seen
             ray = pointing.click_ray({"start": start, "action": action})
-            aimed = pick(*ray) if ray is not None else None
+            aimed = self.grab_hit(pick(*ray)) if ray is not None else None
             self.set_aim(peer, self.pointing.aims_at_selection(aimed))
 
     def current_tool(self):
@@ -553,7 +621,11 @@ class Controls:
         log(f"{tap} by {peer[:8]} aimed by {source} (last hover {age}){aim}: {name or 'nothing'}")
         if name is None:
             return
-        select_only(name)
+        if double_tap:
+            # A double tap takes the whole model: the top of the parent chain of the hit part moves it
+            # with all its children. A click of Object selection still takes the part it hits.
+            name = root_of(name)
+        select_only(name, with_children=double_tap)
         if name != self.pointing.selection:
             self.pointing.selection = name
             self.publish_selection()

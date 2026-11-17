@@ -10,6 +10,14 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ### Fixed
 
+- A double tap in the headset selects the whole model, not the part it hit: the top of the part's
+  parent chain becomes the selected and active object (a glTF that imports as an empty with child
+  meshes is selected by the empty, its parts show selected in Blender), and a one-hand drag on any
+  part moves the whole model. A click with Object selection still selects the single part.
+- Blender no longer crashes when you select or move objects while the controls panel pushes an undo
+  step. The step was pushed from a timer through a window that could be a file browser or in the middle
+  of a viewport move or an import; it is now pushed only through a freshly found, ready window, and
+  waits for the next tick when there is none.
 - Switching the Renderer to VisRTX while streaming no longer freezes Blender. VisRTX compiles its GPU
   programs on its first start, which takes about two minutes while the NVIDIA OptiX cache is empty
   (a new PC or driver, a cleared cache) and under a second afterwards. The add-on now prepares VisRTX

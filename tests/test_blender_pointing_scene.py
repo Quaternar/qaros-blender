@@ -478,6 +478,90 @@ class HierarchyTests(unittest.TestCase):
         self.assertEqual(tuple(self.proto.location), (0.0, 0.0, 0.0))
 
 
+class ModelSelectionTests(unittest.TestCase):
+    """A model imported as a root empty with child parts (a glTF): a double tap takes the whole model,
+    a click of Object selection the single part, and a drag on any part moves the model."""
+
+    def setUp(self):
+        scene = bpy.context.scene
+        self.model = bpy.data.objects.new("Model", None)
+        self.model.location = (0.0, 20.0, 0.0)
+        scene.collection.objects.link(self.model)
+        bpy.context.view_layer.update()
+        self.parts = []
+        for index, y in enumerate((20.0, 23.0)):
+            part = bpy.data.objects.new(f"Part{index}", unit_cube_mesh(f"PartMesh{index}"))
+            scene.collection.objects.link(part)
+            part.parent = self.model
+            part.matrix_parent_inverse = self.model.matrix_world.inverted()
+            part.matrix_world.translation = (0.0, y, 0.0)
+            self.parts.append(part)
+            bpy.context.view_layer.update()
+        # A grandchild: the root is the top of the whole chain.
+        self.deep = bpy.data.objects.new("Deep", unit_cube_mesh("DeepMesh"))
+        scene.collection.objects.link(self.deep)
+        bpy.context.view_layer.update()
+        self.deep.parent = self.parts[1]
+        self.deep.matrix_parent_inverse = self.parts[1].matrix_world.inverted()
+        self.deep.matrix_world.translation = (0.0, 26.0, 0.0)
+        bpy.context.view_layer.update()
+        layer = bpy.context.view_layer
+        for obj in layer.objects:
+            obj.select_set(False)
+        layer.objects.active = None
+        self.controls = fake_controls(gestures.TOOL_NAVIGATE)
+
+    def tearDown(self):
+        for obj in (self.deep, *self.parts, self.model):
+            bpy.data.objects.remove(obj)
+        bpy.context.view_layer.update()
+
+    def selection(self):
+        layer = bpy.context.view_layer
+        active = layer.objects.active
+        return active.name if active else None, sorted(o.name for o in layer.objects if o.select_get())
+
+    def tap_twice(self, y):
+        self.controls.gesture(click(when=10.0, target=(0.0, y, 0.0), start=(0.0, y, -5.0)))
+        self.controls.gesture(click(when=10.2, target=(0.0, y, 0.0), start=(0.0, y, -5.0)))
+
+    def test_root_of_walks_to_the_top_of_the_parent_chain(self):
+        self.assertEqual(controls.root_of("Deep"), "Model")
+        self.assertEqual(controls.root_of("Part0"), "Model")
+        self.assertEqual(controls.root_of("Model"), "Model")
+        self.assertEqual(controls.root_of("Gone"), "Gone")
+
+    def test_a_double_tap_on_a_part_selects_the_root_and_shows_its_children_selected(self):
+        self.tap_twice(20.0)
+        self.assertEqual(self.selection(), ("Model", ["Deep", "Model", "Part0", "Part1"]))
+        self.assertEqual(self.controls.pointing.selection, "Model")
+
+    def test_a_double_tap_on_a_deep_child_selects_the_root_too(self):
+        self.tap_twice(26.0)
+        self.assertEqual(self.selection()[0], "Model")
+
+    def test_a_click_of_object_selection_still_selects_the_part(self):
+        self.controls.tool = gestures.TOOL_SELECT
+        self.controls.gesture(click(when=10.0, target=(0.0, 23.0, 0.0), start=(0.0, 23.0, -5.0)))
+        self.assertEqual(self.selection(), ("Part1", ["Part1"]))
+
+    def test_a_hit_on_a_part_grabs_the_selected_root(self):
+        controls.select_only("Model")
+        self.controls.follow_selection()
+        self.assertEqual(self.controls.grab_hit("Part1"), "Model")
+        self.assertEqual(self.controls.grab_hit("Deep"), "Model")
+        self.assertEqual(self.controls.grab_hit("Cube"), "Cube")
+        self.assertIsNone(self.controls.grab_hit(None))
+
+    def test_moving_the_root_moves_every_part(self):
+        self.tap_twice(23.0)
+        self.controls.move("Model", (1.0, 20.0, 2.0))
+        bpy.context.view_layer.update()
+        self.assertEqual(tuple(round(v, 5) for v in self.parts[0].matrix_world.translation), (1.0, 20.0, 2.0))
+        self.assertEqual(tuple(round(v, 5) for v in self.parts[1].matrix_world.translation), (1.0, 23.0, 2.0))
+        self.assertEqual(tuple(round(v, 5) for v in self.deep.matrix_world.translation), (1.0, 26.0, 2.0))
+
+
 if __name__ == "__main__":
     result = unittest.main(argv=[sys.argv[0]], exit=False).result
     sys.exit(0 if result.wasSuccessful() else 1)
