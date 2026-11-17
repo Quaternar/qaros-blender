@@ -8,6 +8,8 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-17
+
 ### Fixed
 
 - Blender 5.3 crashes with the add-on (an access violation in the GPU driver's OpenGL library), so the supported range is Blender 4.5 to 5.2. On Blender 5.3
