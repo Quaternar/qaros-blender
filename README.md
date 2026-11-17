@@ -15,7 +15,7 @@ flowchart LR
 
 ## Requirements
 
-- Windows, Blender 4.5 LTS or newer.
+- Windows, Blender 4.5 LTS to 5.2. Blender 5.3 is not supported yet: the add-on refuses to start there.
 - [QAROS](https://docs.quaternar.com/docs/operator-guide/installation) installed with the **ANARI
   device** component (`/ANARI`); optionally the **OSPRay backend (CPU)** component (`/OSPRay`).
 

@@ -13,7 +13,8 @@ latest release, in the format of the other QAROS app releases (qaros-rerun):
     {"version": 1, "release": "0.4.0", "package": "qaros-blender",
      "assets": [{"name": "qaros_blender_anari-0.4.0.zip", "sha256": "...", "size": 123, "platform": "any",
                  "app_version": "0.4.0", "min_qaros_version": "0.9.0",
-                 "min_blender_version": "4.5.0", "addon_module": "qaros_anari"}]}
+                 "min_blender_version": "4.5.0", "max_blender_version": "5.2.99",
+                 "addon_module": "qaros_anari"}]}
 
 `platform` is `any`: the add-on is pure Python and loads QAROS's own ANARI device. The file VERSION
 holds the last release `X.Y.Z` and must equal bl_info["version"]. The version is --version, or else
@@ -24,6 +25,7 @@ carry the next patch (ADR-0002 of Quaternar/qaros)."""
 import argparse
 import ast
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import re
@@ -31,6 +33,11 @@ import subprocess
 import sys
 
 import build_zip
+
+# blender_support.py is plain Python (no bpy), loaded by path so the add-on's other modules stay out.
+_spec = importlib.util.spec_from_file_location("qaros_blender_support", build_zip.ADDON / "blender_support.py")
+blender_support = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(blender_support)
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION_FILE = ROOT / "VERSION"
@@ -144,6 +151,7 @@ def package(version, out_dir):
         "app_version": version,
         "min_qaros_version": MIN_QAROS_VERSION,
         "min_blender_version": dotted(bl_info()["blender"]),
+        "max_blender_version": dotted(blender_support.MAX_BLENDER),
         "addon_module": ADDON_MODULE,
     }
     manifest = {"version": MANIFEST_FORMAT, "release": version, "package": PACKAGE, "assets": [asset]}

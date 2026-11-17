@@ -16,7 +16,7 @@ flowchart LR
 |---|---|
 | QAROS | installed with the **ANARI device** component (setup section **ANARI applications**, or `/ANARI`; see [Installation](https://docs.quaternar.com/docs/operator-guide/installation))) |
 | OSPRay backend | optional: the setup's **OSPRay backend (CPU)** section (`/OSPRay`) |
-| Blender | 4.5 LTS or newer, on the QAROS PC (Windows) |
+| Blender | 4.5 LTS to 5.2, on the QAROS PC (Windows). Blender 5.3 is not supported yet |
 | GPU | OpenGL 4.3 for the VisGL backend; the CPU backends need none |
 
 ## Set up
