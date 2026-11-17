@@ -13,7 +13,7 @@ import time
 import bpy
 from bpy.app.handlers import persistent
 
-from . import anari, blender_panels, shading, targets, usd_import
+from . import anari, blender_panels, blender_support, shading, targets, usd_import
 from .hub_launch import (
     AutoStartOnce,
     StopRequestWatcher,
@@ -22,7 +22,7 @@ from .hub_launch import (
     started_by_hub,
     stdin_is_pipe,
 )
-from .controls import Controls, selected_name
+from .controls import Controls, outlined_names, selected_name
 from .controls import _window_override as controls_window_override
 from .gestures import TOOL_IDS, TOOL_NAVIGATE, TOOLS
 from .protocol import panel_names, toggled_panel
@@ -35,7 +35,7 @@ from .volume_name import choose_volume, conflict_message, streaming_note
 bl_info = {
     "name": "QAROS ANARI Streaming",
     "author": "Quaternar",
-    "version": (0, 5, 0),
+    "version": (0, 5, 1),
     "blender": (4, 5, 0),
     "location": "3D View > Sidebar > QAROS",
     "description": "Streams the scene to QAROS headsets through the qaros ANARI device",
@@ -888,11 +888,11 @@ class Streamer:
         """Outlines Blender's selection in the stream, as Blender's viewport outlines it: the
         selected active object, picked in the headset or in Blender's UI (controls.selected_name).
         A selection change updates the depsgraph, so every change passes through sync()."""
-        name = selected_name()
-        if name == self.selection:
+        names = outlined_names(selected_name())
+        if names == self.selection:
             return
-        self.selection = name
-        self.worker.select(name)
+        self.selection = names
+        self.worker.select(names)
 
     def resync(self):
         if self.running:
@@ -1663,6 +1663,11 @@ def unregister_properties():
 
 
 def register():
+    if not blender_support.supported(bpy.app.version):
+        # Blender 5.3 crashes with the add-on: refuse before anything is registered.
+        message = blender_support.unsupported_message(bpy.app.version)
+        print(message, file=sys.stderr)
+        raise RuntimeError(message)
     for cls in CLASSES:
         bpy.utils.register_class(cls)
     usd_import.register()

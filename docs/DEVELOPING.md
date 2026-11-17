@@ -264,6 +264,7 @@ per version with the add-on ZIP and a `manifest.json`. The QAROS Visualizer's Bl
       "app_version": "0.4.0",
       "min_qaros_version": "0.9.0",
       "min_blender_version": "4.5.0",
+      "max_blender_version": "5.2.99",
       "addon_module": "qaros_anari"
     }
   ]
@@ -273,7 +274,9 @@ per version with the add-on ZIP and a `manifest.json`. The QAROS Visualizer's Bl
 - `version` is the manifest format, `release` the add-on version, `package` always `qaros-blender`.
 - `platform` is `any`: the add-on is pure Python and loads QAROS's own ANARI device.
 - `min_qaros_version` is `MIN_QAROS_VERSION` in `tools/package_release.py`, the oldest QAROS the
-  add-on streams with; `min_blender_version` is `bl_info["blender"]`; `addon_module` is the name
+  add-on streams with; `min_blender_version` is `bl_info["blender"]` and `max_blender_version` (inclusive) is
+  `MAX_BLENDER` in `blender/qaros_anari/blender_support.py`, which `register()` also enforces (a
+  Blender above it is refused, 5.3 crashes); `addon_module` is the name
   Blender enables (`--addons qaros_anari`).
 - `python tools/package_release.py --out-dir dist/release` writes both locally.
 

@@ -237,6 +237,17 @@ def root_of(name):
     return chain[-1].name if chain else name
 
 
+def outlined_names(name):
+    """The objects the stream outlines for the selected object `name`: it and everything below it in
+    the parent chain (a model's root has no geometry of its own, its parts do). () for none."""
+    if name is None:
+        return ()
+    obj = bpy.data.objects.get(name)
+    if obj is None:
+        return (name,)
+    return (name, *(child.name for child in obj.children_recursive))
+
+
 def within(name, top):
     """Whether object `name` is `top` or below it in the parent chain."""
     obj = bpy.data.objects.get(name)

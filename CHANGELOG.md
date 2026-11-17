@@ -13,7 +13,8 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 - A double tap in the headset selects the whole model, not the part it hit: the top of the part's
   parent chain becomes the selected and active object (a glTF that imports as an empty with child
   meshes is selected by the empty, its parts show selected in Blender), and a one-hand drag on any
-  part moves the whole model. A click with Object selection still selects the single part.
+  part moves the whole model, and the stream outlines the whole model. A click with Object
+  selection still selects the single part.
 - Blender no longer crashes when you select or move objects while the controls panel pushes an undo
   step. The step was pushed from a timer through a window that could be a file browser or in the middle
   of a viewport move or an import; it is now pushed only through a freshly found, ready window, and
@@ -25,6 +26,14 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
   start can take a few minutes" in the QAROS tab), and restarts on it when it is ready. If VisRTX
   fails or does not answer within ten minutes, the stream stays on the renderer it had and the tab
   says why. Choosing VisRTX while not streaming prepares it in the background too, so Start is quick.
+
+## [0.5.1] - 2026-11-17
+
+### Fixed
+
+- Blender 5.3 crashes with the add-on (an access violation in the GPU driver's OpenGL library), so the supported range is Blender 4.5 to 5.2. On Blender 5.3
+  or newer the add-on refuses to start and says why, and `manifest.json` names the newest Blender
+  (`max_blender_version`) so the QAROS Visualizer's Blender tile does not offer it.
 
 ## [0.5.0] - 2026-11-17
 

@@ -36,7 +36,7 @@ UNIT = ["test_blender_helper.py", "test_blender_hub_launch.py", "test_blender_an
         "test_blender_volume_name.py", "test_blender_targets.py",
         "test_blender_panel.py", "test_blender_controls_protocol.py", "test_blender_pointing.py", "test_blender_gestures.py",
         "test_blender_shading.py",
-        "test_release_package.py"]
+        "test_release_package.py", "test_blender_support.py"]
 BLENDER = ["test_blender_panel_replay.py", "test_blender_pointing_scene.py", "test_blender_usd_import.py",
            "test_blender_addon_launch.py", "test_blender_splats.py",
            "test_blender_targets_scene.py", "test_blender_selection_outline.py", "test_blender_tab.py",
