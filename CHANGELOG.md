@@ -8,6 +8,8 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-11-17
+
 ### Fixed
 
 - A double tap in the headset selects the whole model, not the part it hit: the top of the part's
