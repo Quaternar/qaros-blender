@@ -8,6 +8,16 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ## [Unreleased]
 
+### Fixed
+
+- Switching the Renderer to VisRTX while streaming no longer freezes Blender. VisRTX compiles its GPU
+  programs on its first start, which takes about two minutes while the NVIDIA OptiX cache is empty
+  (a new PC or driver, a cleared cache) and under a second afterwards. The add-on now prepares VisRTX
+  in the background, keeps streaming on the current renderer meanwhile ("Starting VisRTX... the first
+  start can take a few minutes" in the QAROS tab), and restarts on it when it is ready. If VisRTX
+  fails or does not answer within ten minutes, the stream stays on the renderer it had and the tab
+  says why. Choosing VisRTX while not streaming prepares it in the background too, so Start is quick.
+
 ## [0.5.0] - 2026-11-17
 
 ### Added

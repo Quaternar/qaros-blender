@@ -43,7 +43,8 @@ BLENDER = ["test_blender_panel_replay.py", "test_blender_pointing_scene.py", "te
 # Plain Python driving Blender processes of its own (--blender).
 BLENDER_DRIVER = ["test_blender_addon_install.py"]
 DEVICE_PYTHON = ["test_blender_addon_binding.py"]
-DEVICE_BLENDER = ["test_blender_addon_sync.py", "test_blender_usd_scene.py"]
+DEVICE_BLENDER = ["test_blender_addon_sync.py", "test_blender_usd_scene.py",
+                  "test_blender_renderer_switch.py"]
 
 
 def installed_anari_folder():

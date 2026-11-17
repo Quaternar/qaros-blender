@@ -28,6 +28,7 @@ from .protocol import panel_names, toggled_panel
 from .materials import material_descriptions, principled_shader
 from .panel import QarError, Runtime, ServedPanel, VolumeGestures
 from .sync import GEOMETRY_TYPES, SceneCapture, SceneMirror, SyncWorker, scene_bounds, streams
+from .sync import streaming_renderer as sync_streaming_renderer
 from .volume_name import choose_volume, conflict_message, streaming_note
 
 bl_info = {
@@ -354,6 +355,79 @@ def store_scene_targets(scene, choice):
         scene.qaros_stream_targets = text
 
 
+def tag_redraw():
+    """Redraws every area: the tab's status changes with no input event."""
+    try:
+        for window in bpy.context.window_manager.windows:
+            for area in window.screen.areas:
+                area.tag_redraw()
+    except Exception:  # noqa: BLE001 - background mode has no windows
+        pass
+
+
+# Back ends that compile GPU programs on their first device: VisRTX builds its OptiX modules, which takes
+# about two minutes while the OptiX disk cache is empty (a new PC, a new driver, a cleared cache) and a
+# fraction of a second once it is filled. Building them on Blender's UI thread froze Blender for that long.
+WARM_BACKENDS = frozenset({"visrtx"})
+WARMUP_TIMEOUT_S = 600.0
+SWITCH_POLL_INTERVAL = 0.25
+LIBRARY_LOCK = threading.Lock()
+
+
+class Warmup:
+    """One throwaway device on a back end, built and rendered once on a thread of its own, streaming
+    off: it fills the back end's compile cache so the real device starts at once. Never touches bpy."""
+
+    def __init__(self, key, folder, on_status):
+        self.key = key
+        self.error = None
+        self.started = time.monotonic()
+        self.thread = threading.Thread(
+            target=self.run, args=(folder, on_status), name=f"qaros-anari-warm-{key}", daemon=True
+        )
+        self.thread.start()
+
+    @property
+    def alive(self):
+        return self.thread.is_alive()
+
+    def run(self, folder, on_status):
+        try:
+            library = Streamer.library_for(self.key, folder, on_status)
+            device = library.new_device()
+            try:
+                device.commit()
+                subtype = sync_streaming_renderer(device.property_string("qar.backend") or self.key)[0]
+                camera = device.new("Camera", "perspective")
+                renderer = device.new("Renderer", subtype)
+                world = device.new("World")
+                frame = device.new("Frame")
+                for handle in (camera, renderer, world):
+                    device.commit(handle)
+                device.set(frame, "world", anari.WORLD, world)
+                device.set(frame, "renderer", anari.RENDERER, renderer)
+                device.set(frame, "camera", anari.CAMERA, camera)
+                device.set(frame, "size", anari.UINT32_VEC2, (64, 64))
+                device.set(frame, "channel.color", anari.DATA_TYPE, anari.UFIXED8_RGBA_SRGB)
+                device.commit(frame)
+                device.render(frame)
+                for handle in (frame, world, renderer, camera):
+                    device.release(handle)
+            finally:
+                device.close()
+        except Exception as error:  # noqa: BLE001 - shown in the tab by the switch
+            self.error = str(error) or type(error).__name__
+
+
+class Switch:
+    """A running stream waiting for the new Renderer's back end to be ready."""
+
+    def __init__(self, key, previous, warmup):
+        self.key = key
+        self.previous = previous
+        self.warmup = warmup
+
+
 class Streamer:
     """The one stream of this Blender process. An ANARI library is loaded once per Renderer and
     kept: qaros keeps the QAR runtime loaded for the life of the process, and it chooses its backend
@@ -364,6 +438,8 @@ class Streamer:
     library = None  # the library the running or last stream used
     libraries = {}  # Renderer preference -> anari.Library
     folder = None  # the ANARI folder preference the first library loaded from
+    warmed = set()  # Renderer preferences whose first device has been built (compile cache filled)
+    warmups = {}  # Renderer preference -> the Warmup in flight or failed
 
     def __init__(self):
         self.device = None
@@ -378,6 +454,8 @@ class Streamer:
         self.joining = None
         self.scene_name = None
         self.error = None
+        self.switching = None  # the Switch waiting for the new back end; the old one keeps streaming
+        self.switch_error = None  # why the last Renderer switch fell back (the old one still streams)
         self.stopping = False
         self.volume = None  # the VolumeChoice of the running device
         self.runtime = None  # the QAR runtime the device loaded, for the served panel
@@ -406,6 +484,14 @@ class Streamer:
             return "ERROR", self.error, True
         if not self.running:
             return "UNLINKED", "Off", False
+        if self.switching is not None:
+            waited = round(time.monotonic() - self.switching.warmup.started)
+            label = BACKEND_LABELS.get(self.switching.key, self.switching.key)
+            previous = BACKEND_LABELS.get(self.switching.previous, self.switching.previous)
+            text = f"Starting {label}... the first start can take a few minutes ({waited} s). Still on {previous}"
+            return "SORTTIME", text, False
+        if self.switch_error:
+            return "ERROR", self.switch_error, True
         if self.stopping:
             return "SORTTIME", "Stopping (waiting for QAROS to answer)", False
         if self.joining is not None and self.joining.is_alive():
@@ -424,23 +510,30 @@ class Streamer:
             text += f" at {round(scale * 100)} % resolution"
         return "LINKED", text, False
 
+    @classmethod
+    def library_for(cls, key, folder, on_status):
+        """The `qaros` library for the Renderer preference `key`, loaded on first use (any thread)."""
+        with LIBRARY_LOCK:
+            library = cls.libraries.get(key)
+            if library is None:
+                folder = folder if cls.folder is None else cls.folder
+                backend_environment(key, os.environ, STARTUP_BACKEND)
+                library = anari.Library(folder, LIBRARY_NAME, on_status)
+                cls.libraries[key] = library
+                cls.folder = folder
+            return library
+
     def load_library(self, prefs):
         """The `qaros` library for the Renderer preference, loaded on first use."""
         key = prefs.backend
-        library = Streamer.libraries.get(key)
-        if library is None:
-            folder = prefs.anari_folder if Streamer.folder is None else Streamer.folder
-            backend_environment(prefs.backend, os.environ, STARTUP_BACKEND)
-            library = anari.Library(folder, LIBRARY_NAME, self.on_status)
-            Streamer.libraries[key] = library
-            Streamer.folder = folder
+        library = Streamer.library_for(key, prefs.anari_folder, self.on_status)
         Streamer.library = library
         self.library_key = key
         return library
 
     def restart_reasons(self):
         """The preferences that apply when streaming starts and differ from the running stream's."""
-        if not self.running:
+        if not self.running or self.switching is not None:
             return ()
         prefs = preferences()
         reasons = []
@@ -452,17 +545,101 @@ class Streamer:
 
     def can_restart(self):
         """A stream that has joined QAROS can stop at once; one still joining cannot."""
-        return self.running and not self.stopping and not (self.joining is not None and self.joining.is_alive())
+        return (
+            self.running and not self.stopping and self.switching is None
+            and not (self.joining is not None and self.joining.is_alive())
+        )
 
     def restart(self, context):
         """Stops and starts again with the current preferences (a new device on the chosen
         renderer, into the same app volume). False when it cannot stop at once."""
         if not self.can_restart():
             return False
+        self.switch_error = None
+        key = preferences().backend
+        if key != self.library_key and key in WARM_BACKENDS and key not in Streamer.warmed:
+            # The new back end's first start is slow: build it beside the running stream, off
+            # Blender's UI thread, and switch when it is ready.
+            self.begin_switch(key)
+            return True
+        self.restart_now(context)
+        return True
+
+    def restart_now(self, context):
         log("restarting the stream")
         self.stop(wait=True)
         self.start(context)
-        return True
+
+    def prewarm(self, key):
+        """Starts building `key`'s first device in the background (nothing streams on it): its
+        first Start is then quick. None for a back end without a slow first start."""
+        if key not in WARM_BACKENDS or key in Streamer.warmed:
+            return None
+        warmup = Streamer.warmups.get(key)
+        if warmup is None or (not warmup.alive and warmup.error):
+            log(f"preparing {key} in the background")
+            warmup = Streamer.warmups[key] = Warmup(key, preferences().anari_folder, self.on_status)
+        return warmup
+
+    def begin_switch(self, key):
+        warmup = self.prewarm(key)
+        if warmup is None:  # warmed in the meantime
+            self.restart_now(bpy.context)
+            return
+        self.switching = Switch(key, self.library_key, warmup)
+        log(f"switching to {key}: it starts in the background; {self.library_key} keeps streaming")
+        bpy.app.timers.register(self.poll_switch, first_interval=SWITCH_POLL_INTERVAL)
+
+    def abandon_switch(self, reason):
+        """The new back end did not come up: the Renderer preference returns to the one still
+        streaming, and the tab says why."""
+        switch, self.switching = self.switching, None
+        preferences().backend = switch.previous
+        label = BACKEND_LABELS.get(switch.key, switch.key)
+        previous = BACKEND_LABELS.get(switch.previous, switch.previous)
+        self.switch_error = f"{label} did not start: {reason}. Still on {previous}"
+        log(self.switch_error)
+
+    def poll_switch(self):
+        """Timer: finishes or abandons the switch. The stream restarts on the new back end only once
+        its first device exists, so the restart takes the time of a cached start."""
+        switch = self.switching
+        if switch is None:
+            return None
+        if not self.running or self.stopping:
+            self.switching = None
+            return None
+        warmup = switch.warmup
+        if warmup.alive:
+            if time.monotonic() - warmup.started > WARMUP_TIMEOUT_S:
+                self.abandon_switch(f"no answer after {round(WARMUP_TIMEOUT_S)} s")
+                tag_redraw()
+                return None
+            tag_redraw()
+            return SWITCH_POLL_INTERVAL
+        if warmup.error:
+            Streamer.warmups.pop(switch.key, None)
+            self.abandon_switch(warmup.error)
+            tag_redraw()
+            return None
+        Streamer.warmed.add(switch.key)
+        self.switching = None
+        try:
+            self.restart_now(bpy.context)
+        except Exception as error:  # noqa: BLE001 - back to the renderer that worked
+            log(f"restart on {switch.key} failed: {error!r}")
+            if self.running:
+                self.stop(wait=True)
+            preferences().backend = switch.previous
+            try:
+                self.start(bpy.context)
+                label = BACKEND_LABELS.get(switch.key, switch.key)
+                previous = BACKEND_LABELS.get(switch.previous, switch.previous)
+                self.switch_error = f"{label} did not start: {error}. Back on {previous}"
+            except Exception as again:  # noqa: BLE001 - shown in the tab
+                self.error = f"Cannot start: {again}"
+        tag_redraw()
+        return None
 
     def follow_shading(self):
         """Gives the stream the shading the QAROS tab asks for (the 3D viewport's by default): a
@@ -479,6 +656,7 @@ class Streamer:
     def start(self, context):
         prefs = preferences()
         self.error = None
+        self.switch_error = None
         device = self.load_library(prefs).new_device()
         # qar.* parameters are read when streaming starts; with no onboarding set, qaros joins the
         # QAROS on this PC by local enrollment.
@@ -644,6 +822,7 @@ class Streamer:
         """Stops syncing at once. Joining cannot be cancelled and releasing the device under it
         would free what it uses, so while it still waits for QAROS (an unanswered approval lasts
         a minute) the release finishes from a timer instead of freezing Blender."""
+        self.switching = None
         remove_handlers()
         if self.joining is not None and self.joining.is_alive() and not wait:
             self.stopping = True
@@ -872,6 +1051,8 @@ class QAROS_OT_set_backend(bpy.types.Operator):
             prefs.backend = self.backend
             if context.preferences.addons.get(__package__) is not None:
                 context.preferences.is_dirty = True
+        if not STREAMER.running:
+            STREAMER.prewarm(self.backend)
         if not STREAMER.restart_reasons():
             return {"FINISHED"}
         if not STREAMER.can_restart():
