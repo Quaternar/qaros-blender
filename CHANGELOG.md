@@ -27,8 +27,24 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 - The selected object is outlined in the headset, in Blender's orange, as in Blender's viewport:
   selected in the headset or in Blender. Needs a QAROS whose ANARI device draws the selection
   outline, and a backend that renders object ids (VisRTX, OSPRay, Helide; not VisGL).
+- The stream follows the 3D viewport's shading: **Wireframe** streams mesh edges as thin lines,
+  **Solid** matte surfaces in the viewport colour, **Material Preview** and **Rendered** the
+  exported materials, with the scene's lamps and World as the viewport's options say. The QAROS
+  tab's **View** panel can fix one shading instead.
+- **Renderer** in the QAROS tab: choose VisGL, VisRTX, OSPRay, Helide or Automatic; while
+  streaming, the stream restarts on the new one. No Blender restart.
+- **Active Object** in the QAROS tab follows Blender's selection: what the stream does with the
+  object, its **Stream to QAROS** setting (also in **Properties → Object → QAROS**), the material
+  values the stream uses and its transform. **Select an object** when nothing is selected.
+- **Stream to QAROS** per object: off, the object stays in Blender only. Saved with the `.blend`.
 
 ### Changed
+
+- The QAROS tab is Blender-style: collapsible sub-panels (Active Object, View, Renderer, Streams
+  To, Headset, Diagnostics), icons for the status and on buttons, help in tooltips. Material
+  notes and objects left out moved to **Diagnostics**, closed by default.
+- **Backend** preference is now **Renderer** and applies at the next Start instead of after a
+  Blender restart.
 
 - Blender decides what every hand gesture in the app volume does; QAROS only reports gestures and
   draws the rays. While streaming the add-on replaces the volume's gesture rules, and restores them

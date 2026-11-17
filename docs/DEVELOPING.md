@@ -73,6 +73,29 @@ sequenceDiagram
   surfaces to grain; SciVis ignores hdri lights.
 - **Backend order:** Automatic sets `QAR_ANARI_BACKEND_ORDER=visgl,visrtx,ospray,helide` before
   the library loads (kept when already set); a qaros without that variable keeps its own order.
+- **Renderer switch** (`Streamer.load_library`, `QAROS_OT_set_backend`): qaros chooses its backend
+  when its library loads (`QAR_ANARI_BACKEND`, else the order) and never unloads, so each Renderer
+  choice loads `qaros` once more (`anariLoadLibrary`, a library of its own with its own backend)
+  and keeps it in `Streamer.libraries`. Every load uses the first load's ANARI folder: a second
+  `anari.dll` would be a second ANARI runtime in the process. A Renderer chosen while streaming
+  restarts the stream (`Streamer.restart`: stop with wait, start), except while the first render
+  still joins QAROS; the Renderer panel then offers the restart. Switching backends in one process
+  was checked with every shipped backend (VisGL, VisRTX, OSPRay, Helide) in any order, each device
+  having rendered a frame (a VisGL device released before its first frame crashes the process).
+- **Shading** (`shading.py`): the stream follows the largest 3D viewport's shading, or a fixed
+  choice (`WindowManager.qaros_shading`), polled every 0.25 s while streaming (`watch_shading`: a
+  shading change sends no depsgraph update). A change is a full capture in the new
+  `SceneCapture.shading`:
+  - Wireframe captures each mesh's edges (`sync.mesh_wire`) as one part whose indices are pairs;
+    `SceneMirror.build_group` makes a `cylinder` geometry of it (every shipped backend has one;
+    ANARI has no line primitive) with a radius of a thousandth of the scene's diagonal, divided by
+    the instance's scale; merged chunks bake the transform, so they take the radius as is.
+  - Solid replaces each material description with a matte one in the viewport colour
+    (`shading.shaded_description`); Wireframe with one light grey matte material (`WIRE_KEY`).
+  - Solid and Wireframe drop the scene's lamps and World, so the studio light lights them; Material
+    Preview and Rendered follow the viewport's Scene Lights and Scene World options.
+- **Stream to QAROS** (`Object.qaros_stream`): the capture leaves out an object with it off, and every
+  instance such an object creates; its update tags the object so the depsgraph handler runs.
 - **Materials:** constant inputs of the active Principled BSDF (`materials.py`); the device's
   advertised capabilities decide what each backend gets.
 - **Controls panel** (`panel.py`, `controls.py`, `protocol.py`, `blender_panels.py`): the page is
@@ -160,7 +183,7 @@ sequenceDiagram
   first. A Blender started by hand never quits on its own.
 - **Start from the Blender tile** (`hub_launch.py`): the QAROS Visualizer's Blender tile starts
   Blender with `--addons qaros_anari` and `QAR_BLENDER_AUTO_START=1`. The add-on then presses
-  **Start streaming** once, 0.5 s after it registered (a persistent timer, so a `.blend` named on the
+  **Start Streaming** once, 0.5 s after it registered (a persistent timer, so a `.blend` named on the
   command line is loaded first). `1`, `true`, `on`, `yes` (any case) switch it on; `0`, `false`,
   `off`, `no` or unset leave it off; any other text is off with a warning in the console. A failed
   Start is not repeated, and a Start the user pressed first is not doubled.

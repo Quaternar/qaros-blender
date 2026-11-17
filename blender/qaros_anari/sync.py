@@ -24,6 +24,7 @@ from .materials import (
     material_export,
     material_key,
 )
+from .shading import WIRE_KEY, WIRE_MATERIAL, Shading, shaded_description, wire_radius
 from .world import world_environment
 
 # Blender world (Z up, -Y forward) -> app volume (Y up, -Z forward): (x, y, z) -> (x, z, -y).
@@ -187,6 +188,47 @@ def mesh_parts(evaluated, materials):
         evaluated.to_mesh_clear()
 
 
+def mesh_wire(evaluated, materials):
+    """The edges of `evaluated` as one wire part, (positions, None, segments, WIRE_KEY) with
+    segments of two vertex indices, for Wireframe shading; None without edges. Blender's own edges,
+    not the triangles': a quad shows four sides, as the viewport draws it."""
+    mesh = evaluated.to_mesh()
+    try:
+        if mesh is None or not len(mesh.edges):
+            return None
+        positions = np.empty(len(mesh.vertices) * 3, dtype=np.float32)
+        mesh.vertices.foreach_get("co", positions)
+        edges = np.empty(len(mesh.edges) * 2, dtype=np.int32)
+        mesh.edges.foreach_get("vertices", edges)
+        materials.setdefault(WIRE_KEY, WIRE_MATERIAL)
+        return [(
+            np.ascontiguousarray(positions.reshape(-1, 3)),
+            None,
+            np.ascontiguousarray(edges.reshape(-1, 2).astype(np.uint32)),
+            WIRE_KEY,
+        )]
+    finally:
+        evaluated.to_mesh_clear()
+
+
+def is_wire(part):
+    """Whether a part is a wire (segments of two vertices) rather than triangles."""
+    return part[2].ndim == 2 and part[2].shape[1] == 2
+
+
+def streams(obj):
+    """Whether the object's QAROS setting (Object > QAROS > Stream) leaves it in the stream."""
+    if obj is None:
+        return True
+    return bool(getattr(getattr(obj, "original", obj), "qaros_stream", True))
+
+
+def transform_scale(transform):
+    """The largest axis scale of a column-major FLOAT32_MAT4: wires keep their width under it."""
+    columns = np.array(transform, dtype=np.float64).reshape(4, 4)[:3, :3]
+    return max(float(np.linalg.norm(columns, axis=1).max()), 1e-6)
+
+
 def same_mesh_parts(previous, current):
     """Material edits may tag the evaluated geometry dirty. Rebuild only when exported geometry
     or slot assignments changed, even if an actual mesh edit arrived in the same update."""
@@ -291,6 +333,7 @@ class Snapshot:
 
     def __init__(self, full):
         self.full = full
+        self.wire_radius = None  # Wireframe shading: the wires' radius in Blender units
         self.meshes = {}
         self.materials = {}
         self.instances = []
@@ -301,6 +344,7 @@ class Snapshot:
         """Keep the latest description per material. A newer full capture replaces older scene
         data; incremental captures retain changes still waiting to be applied."""
         self.full = self.full or newer.full
+        self.wire_radius = newer.wire_radius or self.wire_radius
         if newer.full:
             self.meshes = newer.meshes.copy()
             self.materials = newer.materials.copy()
@@ -344,6 +388,8 @@ def scene_bounds(depsgraph):
             continue
         if not instance.is_instance and not evaluated.original.visible_get():
             continue
+        if not streams(evaluated.original) or (instance.is_instance and not streams(instance.parent)):
+            continue
         if unstreamed_reason(evaluated) is not None:
             continue
         local = np.array([tuple(corner) + (1.0,) for corner in evaluated.bound_box], dtype=np.float32)
@@ -370,6 +416,9 @@ class SceneCapture:
         self.on_warning = on_warning
         self.environment_pixels = {}  # the World image's source -> its pixels, read once
         self.world_reported = set()  # World warnings already logged
+        # How the stream shades (shading.py). A change takes a full capture: Streamer.follow_shading.
+        self.shading = Shading()
+        self.wire_radius = None
 
     def capture(self, depsgraph, dirty_objects, full, materials=None):
         """`dirty_objects`: names whose evaluated geometry may have changed. `materials`: plain
@@ -379,6 +428,9 @@ class SceneCapture:
         if full:
             self.meshes.clear()
             self.materials.clear()
+            if self.shading.wire:
+                self.wire_radius = wire_radius(*(scene_bounds(depsgraph) or (None, None)))
+        snapshot.wire_radius = self.wire_radius if self.shading.wire else None
         extracted = set()
         seen = set()
         unstreamed = {}
@@ -386,6 +438,9 @@ class SceneCapture:
             evaluated = instance.object
             original = evaluated.original
             if not instance.is_instance and not original.visible_get():
+                continue
+            # Object > QAROS > Stream off, on the object or on what instances it.
+            if not streams(original) or (instance.is_instance and not streams(instance.parent)):
                 continue
             reason = unstreamed_reason(evaluated)
             if reason is not None:
@@ -399,20 +454,27 @@ class SceneCapture:
                 name = original.name
                 seen.add(name)
                 if name not in extracted and (name in dirty_objects or name not in self.meshes):
-                    parts = mesh_parts(evaluated, snapshot.materials)
+                    if self.shading.wire:
+                        parts = mesh_wire(evaluated, snapshot.materials)
+                    else:
+                        parts = mesh_parts(evaluated, snapshot.materials)
                     if name not in self.meshes or not same_mesh_parts(self.meshes[name], parts):
                         snapshot.meshes[name] = parts
                         self.meshes[name] = parts
                     extracted.add(name)
                 snapshot.instances.append((name, column_major(instance.matrix_world)))
-            elif evaluated.type == "LIGHT":
+            elif evaluated.type == "LIGHT" and self.shading.scene_lights:
                 light = light_parameters(evaluated.data, instance.matrix_world)
                 if light is not None:
                     snapshot.lights.append(light)
         self.unstreamed = unstreamed
         self.meshes = {name: parts for name, parts in self.meshes.items() if name in seen}
-        snapshot.environment = self.capture_environment(depsgraph.scene)
-        descriptions = snapshot.materials
+        snapshot.environment = self.capture_environment(depsgraph.scene) if self.shading.scene_world else None
+        # Solid and Wireframe replace the exported materials (shading.shaded_description).
+        descriptions = {
+            key: shaded_description(key, description, self.shading)
+            for key, description in snapshot.materials.items()
+        }
         snapshot.materials = {
             key: description for key, description in descriptions.items()
             if self.materials.get(key) != description
@@ -541,6 +603,7 @@ class SceneMirror:
         # same for the whole session, and qar.selection names the selected object's.
         self.object_ids = {}  # object name -> id of its instances
         self.selected = None  # object name the stream outlines, or None
+        self.wire_radius = 0.01  # Wireframe shading: the wires' radius in the scene's units
 
     @property
     def objects(self):
@@ -607,18 +670,22 @@ class SceneMirror:
 
     # Geometry ----------------------------------------------------------------------------------
 
-    def build_group(self, parts):
-        """One group per object: a triangle geometry and surface per part."""
+    def build_group(self, parts, scale=1.0):
+        """One group per object: a triangle geometry and surface per part, or a cylinder geometry
+        per wire part (Wireframe shading) whose radius `scale`, the instance's, keeps the scene's
+        wire width."""
         device = self.device
         owned = []
         surfaces = []
         triangles = 0
         for positions, normals, indices, key in parts:
-            geometry = device.new("Geometry", "triangle")
+            wire = is_wire((positions, normals, indices, key))
+            geometry = device.new("Geometry", "cylinder" if wire else "triangle")
             owned.append(geometry)
             arrays = [
                 ("vertex.position", anari.FLOAT32_VEC3, positions, 12),
-                ("primitive.index", anari.UINT32_VEC3, indices, 12),
+                ("primitive.index", anari.UINT32_VEC2, indices, 8) if wire
+                else ("primitive.index", anari.UINT32_VEC3, indices, 12),
             ]
             if normals is not None:
                 arrays.append(("vertex.normal", anari.FLOAT32_VEC3, normals, 12))
@@ -626,6 +693,8 @@ class SceneMirror:
                 array = device.array(data_type, len(data), data, item_bytes)
                 device.set(geometry, name, anari.ARRAY1D, array)
                 device.release(array)
+            if wire:
+                device.set(geometry, "radius", anari.FLOAT32, self.wire_radius / scale)
             device.commit(geometry)
             surface = device.new("Surface")
             owned.append(surface)
@@ -634,7 +703,7 @@ class SceneMirror:
             device.commit(surface)
             self.surface_materials[surface] = key
             surfaces.append(surface)
-            triangles += len(indices)
+            triangles += 0 if wire else len(indices)
         group = device.new("Group")
         surface_array = device.array(anari.SURFACE, len(surfaces), list(surfaces))
         device.set(group, "surface", anari.ARRAY1D, surface_array)
@@ -772,6 +841,8 @@ class SceneMirror:
             self.drop_batches()
             self.parts.clear()
             self.bounds.clear()
+        if snapshot.wire_radius:
+            self.wire_radius = snapshot.wire_radius
         self.update_materials(snapshot.materials)
         now = time.monotonic()
         for name, parts in snapshot.meshes.items():
@@ -876,7 +947,7 @@ class SceneMirror:
         for name in counts:
             if name not in self.batched and name not in self.groups and name in self.parts:
                 parts = self.parts[name]
-                self.groups[name] = self.build_group(parts) if parts else None
+                self.groups[name] = self.build_group(parts, transform_scale(transforms[name])) if parts else None
         changed = [chunk.instance for chunk in self.chunks] != batches_before
         return self.update_instances(captured) or changed
 

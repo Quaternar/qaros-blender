@@ -23,7 +23,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "blender"))
 import qaros_anari  # noqa: E402
-from qaros_anari import anari, materials, sync, world  # noqa: E402
+from qaros_anari import anari, materials, shading, sync, world  # noqa: E402
 
 FOLDER = os.getcwd()
 
@@ -42,7 +42,8 @@ class BackendPreferenceTests(unittest.TestCase):
         self.items = qaros_anari.Preferences.__annotations__["backend"].keywords["items"]
 
     def test_lists_automatic_and_every_backend(self):
-        self.assertEqual([item[0] for item in self.items], ["auto", "visrtx", "visgl", "ospray", "helide"])
+        self.assertEqual(sorted(item[0] for item in self.items), ["auto", "helide", "ospray", "visgl", "visrtx"])
+        self.assertEqual(self.items[0][0], "auto")
         self.assertEqual(qaros_anari.Preferences.__annotations__["backend"].keywords["default"], "auto")
         # An empty identifier would make Automatic a heading that cannot be chosen again.
         self.assertTrue(all(item[0] for item in self.items))
@@ -52,7 +53,7 @@ class BackendPreferenceTests(unittest.TestCase):
         self.assertEqual(numbers, {"auto": 0, "visrtx": 1, "visgl": 2, "helide": 3, "ospray": 4})
 
     def test_automatic_puts_visgl_first(self):
-        self.assertEqual(self.items[0][2], "VisGL, VisRTX, OSPRay, then Helide")
+        self.assertIn("VisGL, VisRTX, OSPRay, then Helide", self.items[0][2])
         self.assertEqual(qaros_anari.AUTOMATIC_ORDER, "visgl,visrtx,ospray,helide")
 
     def test_visrtx_materials_default_to_physically_based_with_fixed_numbers(self):
@@ -1427,7 +1428,8 @@ class SceneSyncTests(unittest.TestCase):
         bpy.data.objects["Cube"].data.materials[0] = material
         self.settle()
         expected = materials.MaterialDescription(
-            (0.25, 0.5, 0.75), 0.5, 0.75, 0.25, (1.5, 0.5, 0.25), 4.0, is_principled=True
+            (0.25, 0.5, 0.75), 0.5, 0.75, 0.25, (1.5, 0.5, 0.25), 4.0, is_principled=True,
+            viewport_color=tuple(material.diffuse_color)[:3],
         )
         description = self.mirror.material_descriptions[material.name]
         self.assertEqual(description, expected)
@@ -1844,6 +1846,37 @@ class SceneSyncTests(unittest.TestCase):
             if self.streamer.running:
                 self.streamer.release()
             self.setUp()
+
+    def shade(self, mode):
+        """What Streamer.follow_shading does for a new shading: a full resync in it."""
+        self.streamer.capture.shading = shading.from_view(None, mode)
+        self.streamer.resync()
+        self.settle()
+
+    def test_wireframe_renders_the_cube_hollow_and_rendered_brings_its_faces_back(self):
+        size = 64
+        self.shade(shading.WIREFRAME)
+        (positions, normals, segments, key), = self.mirror.parts["Cube"]
+        self.assertEqual((len(positions), len(segments), key), (8, 12, shading.WIRE_KEY))
+        self.assertEqual(self.mirror.triangles, 0)
+        with self.reference_frame(size) as frame:
+            wire = self.render_colour(frame, size)
+        self.assertEqual(wire[size // 2, size // 2, 3], 0, "the middle of the cube is empty")
+        self.assertGreater(int((wire[:, :, 3] > 0).sum()), 0, "the edges are drawn")
+        self.assertLess(int((wire[:, :, 3] > 0).sum()), size * size // 4, "lines, not faces")
+        self.shade(shading.RENDERED)
+        self.assertEqual(self.mirror.triangles, 12)
+        with self.reference_frame(size) as frame:
+            solid = self.render_colour(frame, size)
+        self.assertGreater(solid[size // 2, size // 2, 3], 0, "the faces are back")
+
+    def test_solid_streams_the_viewport_colour_matte(self):
+        bpy.data.materials["Material"].diffuse_color = (0.0, 0.0, 1.0, 1.0)
+        self.shade(shading.SOLID)
+        description = self.mirror.material_descriptions["Material"]
+        self.assertEqual(description.base_color, (0.0, 0.0, 1.0))
+        self.assertFalse(description.is_principled)
+        self.assertEqual(len(self.mirror.lights), 1, "the studio light only")
 
     def test_the_mirrored_world_renders(self):
         device = self.streamer.device
