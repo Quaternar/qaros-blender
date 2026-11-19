@@ -7,6 +7,8 @@ import math
 
 import numpy as np
 
+from . import blender_support
+
 # Wider images are averaged down to this width before they are sent: a 4K HDRI is 100 MB of
 # floats, and a light this blurred by the materials it lights loses nothing visible at 1K.
 MAX_ENVIRONMENT_WIDTH = 1024
@@ -158,7 +160,7 @@ def world_environment(world, cache=None):
     if world is None:
         return None
     warnings = []
-    if not getattr(world, "use_nodes", True) or world.node_tree is None:
+    if not blender_support.uses_nodes(world) or world.node_tree is None:
         return uniform(world.color, 1.0)
     outputs = [
         node for node in world.node_tree.nodes

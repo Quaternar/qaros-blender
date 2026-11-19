@@ -23,14 +23,14 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "blender"))
 import qaros_anari  # noqa: E402
-from qaros_anari import anari, materials, shading, sync, world  # noqa: E402
+from qaros_anari import anari, blender_support, materials, shading, sync, world  # noqa: E402
 
 FOLDER = os.getcwd()
 
 
 def principled_material(name):
     material = bpy.data.materials.new(name)
-    material.use_nodes = True
+    blender_support.enable_nodes(material)
     return material, material.node_tree.nodes.get("Principled BSDF")
 
 
@@ -165,7 +165,8 @@ class MaterialExtractionTests(unittest.TestCase):
     def test_absent_inputs_and_scalar_ranges_have_explicit_defaults(self):
         node = SimpleNamespace(inputs={})
         viewport = SimpleNamespace(use_nodes=False, diffuse_color=(0.25, 0.5, 0.75, 0.5))
-        self.assertEqual(materials.material_description(viewport).opacity, 0.5)
+        with patch.object(blender_support, "running_version", return_value=(4, 5, 0)):
+            self.assertEqual(materials.material_description(viewport).opacity, 0.5)
         self.assertEqual(materials.material_description(None), materials.FALLBACK_MATERIAL)
         with patch.object(materials, "principled_shader", return_value=(node, None)):
             description = materials.material_description(self.material)
@@ -319,7 +320,7 @@ def environment_world(name, image=None, color=(0.2, 0.4, 0.6, 1.0), strength=1.0
     """A World: Background (strength) fed by `image` through an Environment Texture (and a Mapping
     with `rotation`), or by the constant `color`."""
     data = bpy.data.worlds.new(name)
-    data.use_nodes = True
+    blender_support.enable_nodes(data)
     tree = data.node_tree
     background = next(node for node in tree.nodes if node.type == "BACKGROUND")
     background.inputs["Strength"].default_value = strength
@@ -1617,7 +1618,7 @@ class SceneSyncTests(unittest.TestCase):
         node.inputs["Base Color"].default_value = (0.5, 0.0, 0.0, 1.0)
         front.diffuse_color = (0.5, 0.0, 0.0, 1.0)
         rear = bpy.data.materials.new("Opaque blue background")
-        rear.use_nodes = True
+        blender_support.enable_nodes(rear)
         rear_diffuse = rear.node_tree.nodes.new("ShaderNodeBsdfDiffuse")
         rear_output = next(n for n in rear.node_tree.nodes if n.type == "OUTPUT_MATERIAL")
         rear.node_tree.links.new(rear_diffuse.outputs[0], rear_output.inputs["Surface"])

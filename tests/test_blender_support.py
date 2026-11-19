@@ -5,6 +5,7 @@
 import ast
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 
 ADDON = Path(__file__).resolve().parents[1] / "blender" / "qaros_anari"
@@ -40,6 +41,32 @@ class BlenderSupportTest(unittest.TestCase):
         self.assertIsInstance(guard, ast.If)
         self.assertIn("blender_support.supported", ast.unparse(guard.test))
         self.assertTrue(any(isinstance(n, ast.Raise) for n in guard.body))
+
+
+    def test_use_nodes_is_read_only_before_blender_5(self):
+        """Blender 5 shades every material and World by its nodes and warns on each `use_nodes`
+        read; Blender 6.0 removes it."""
+        class Deprecated:
+            node_tree = None
+
+            @property
+            def use_nodes(self):
+                raise AssertionError("use_nodes read on Blender 5")
+
+        for version in ((5, 0, 0), (5, 2, 3), (6, 0, 0)):
+            self.assertTrue(self.support.uses_nodes(Deprecated(), version), version)
+        flat = SimpleNamespace(use_nodes=False)
+        self.assertFalse(self.support.uses_nodes(flat, (4, 5, 0)))
+        self.assertTrue(self.support.uses_nodes(SimpleNamespace(use_nodes=True), (4, 5, 0)))
+        self.assertFalse(self.support.uses_nodes(flat), "plain Python reads the flag")
+
+    def test_enable_nodes_sets_the_flag_only_before_blender_5(self):
+        old = SimpleNamespace(use_nodes=False)
+        self.support.enable_nodes(old, (4, 5, 0))
+        self.assertTrue(old.use_nodes)
+        new = SimpleNamespace()
+        self.support.enable_nodes(new, (5, 0, 0))
+        self.assertFalse(hasattr(new, "use_nodes"))
 
 
 if __name__ == "__main__":

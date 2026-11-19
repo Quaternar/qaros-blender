@@ -8,6 +8,12 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ## [Unreleased]
 
+### Fixed
+
+- Blender 5 no longer prints a `use_nodes` deprecation warning while the add-on reads materials and
+  the World: from Blender 5 every material and World is shaded by its nodes, so the add-on reads
+  `use_nodes` only on Blender 4.5. Prepares for Blender 6.0, which removes it.
+
 ## [0.6.1] - 2026-11-19
 
 - No use_nodes deprecation warning on Blender 5 ([7c9e823d](https://github.com/Quaternar/qaros-blender/commit/7c9e823d3f2b902aa43815ab390ab2caa13acfe6))

@@ -20,7 +20,8 @@ import bpy
 
 def principled(name, colour):
     material = bpy.data.materials.new(name)
-    material.use_nodes = True
+    if bpy.app.version < (5, 0, 0):  # from Blender 5 every material has its node tree
+        material.use_nodes = True
     node = material.node_tree.nodes.get("Principled BSDF")
     node.inputs["Base Color"].default_value = (*colour, 1.0)
     node.inputs["Metallic"].default_value = 0.0

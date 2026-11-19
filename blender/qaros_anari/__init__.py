@@ -1284,7 +1284,7 @@ def draw_object_material(layout, obj):
     column.use_property_split = True
     column.use_property_decorate = False
     stream_shading = STREAMER.capture.shading if STREAMER.capture is not None else wanted_shading()
-    if stream_shading.mode == shading.SOLID or not material.use_nodes or material.node_tree is None:
+    if stream_shading.mode == shading.SOLID or not blender_support.uses_nodes(material) or material.node_tree is None:
         column.prop(material, "diffuse_color", text="Viewport Color")
         return
     node, _reason = principled_shader(material.node_tree)

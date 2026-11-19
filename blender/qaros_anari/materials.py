@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 import math
 
-from . import anari
+from . import anari, blender_support
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +95,7 @@ def material_description(material):
     if material is None:
         return FALLBACK_MATERIAL
     viewport = tuple(material.diffuse_color)
-    if not material.use_nodes:
+    if not blender_support.uses_nodes(material):
         return MaterialDescription(
             base_color=viewport[:3], opacity=max(0.0, min(1.0, viewport[3])), viewport_color=viewport[:3]
         )

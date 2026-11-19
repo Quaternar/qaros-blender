@@ -12,7 +12,7 @@ import time
 import bpy
 from mathutils import Matrix, Quaternion, Vector
 
-from . import blender_panels, gestures, pointing
+from . import blender_panels, blender_support, gestures, pointing
 from .materials import principled_shader
 from .panel import QarError
 from .protocol import (
@@ -77,7 +77,7 @@ def _principled(obj):
     material = obj.active_material if obj is not None else None
     if material is None:
         return None, None, "No material"
-    if not material.use_nodes or material.node_tree is None:
+    if not blender_support.uses_nodes(material) or material.node_tree is None:
         return material, None, "Material does not use nodes"
     node, reason = principled_shader(material.node_tree)
     return material, node, reason
