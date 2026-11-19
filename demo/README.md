@@ -39,7 +39,7 @@ The credit is on the stand's plaque; keep it when you show or share the demo
 | | Needed |
 |---|---|
 | PC | Windows, GPU with OpenGL 4.3 (any recent NVIDIA, AMD or Intel GPU) |
-| QAROS | a build or release with **served GUI panels** for the controls panel (today: branch `feat/anari-blender-served-panel` or `staging/main-with-headset` of Quaternar; QAROS 0.9.0 streams the engine but shows no panel) and the **ANARI device** |
+| QAROS | a build or release with **served GUI panels** for the controls panel (today: Quaternar branch `staging/main-with-headset`, also in `main`; QAROS 0.9.0 streams the engine but shows no panel) and the **ANARI device** |
 | Blender | 4.5 LTS or newer (checked with 5.2) |
 | Add-on | **QAROS ANARI Streaming** from this repository: installed in Blender, or the checkout's `blender` folder passed with `--addon-dir` |
 | Headset (optional) | paired with this QAROS; see [Onboarding devices](https://docs.quaternar.com/docs/user-guide/onboarding-devices/) |
