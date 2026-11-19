@@ -8,6 +8,10 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-19
+
+- No use_nodes deprecation warning on Blender 5 ([7c9e823d](https://github.com/Quaternar/qaros-blender/commit/7c9e823d3f2b902aa43815ab390ab2caa13acfe6))
+
 ## [0.6.0] - 2026-11-19
 
 ### Added
