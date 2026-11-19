@@ -195,8 +195,9 @@ class MaterialDevice:
     def material_support(self):
         return self.support
 
-    def environment_support(self):
-        return self.hdri
+    def environment_support(self, require_visible=True):
+        # hdri: False (none), True (radiance and visible), "radiance" (no visible advertised).
+        return self.hdri is True or (self.hdri == "radiance" and not require_visible)
 
     def new(self, kind, subtype=None):
         if kind == "Material" and subtype == self.fail_subtype:
@@ -294,6 +295,9 @@ class StreamingRendererTests(unittest.TestCase):
     def test_the_world_is_streamed_only_where_an_hdri_light_can_light_it(self):
         self.assertTrue(self.mirror("visrtx", hdri=True)[0].environment_support)
         self.assertFalse(self.mirror("visgl", hdri=False)[0].environment_support)
+        # VisGL's hdri light (QAROS build) only lights, so it needs no visible; VisRTX does.
+        self.assertTrue(self.mirror("visgl", hdri="radiance")[0].environment_support)
+        self.assertFalse(self.mirror("visrtx", hdri="radiance")[0].environment_support)
         # OSPRay has an hdri light, but its SciVis renderer ignores it.
         self.assertFalse(self.mirror("ospray", hdri=True)[0].environment_support)
 
@@ -340,6 +344,43 @@ def float_image(name, width, height, rgba):
     pixels[:, :] = rgba
     image.pixels.foreach_set(pixels.ravel())
     return image
+
+
+class StudioEnvironmentTests(unittest.TestCase):
+    """Material Preview (and Rendered without the World) light the viewport with a studio HDRI,
+    which the stream takes in place of the World."""
+
+    def setUp(self):
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+
+    def test_a_studio_rotation_turns_the_image_like_a_vector_mapping(self):
+        image = sync.StudioImage(float_image("Studio", 8, 4, (1.0, 1.0, 1.0, 1.0)))
+        source, pixels = world.image_source(image), world.image_pixels(image)
+        self.assertEqual(pixels.shape, (4, 8, 3))
+        environment = world.studio_environment(source, pixels, 2.0, math.pi / 2)
+        self.assertEqual(environment.strength, 2.0)
+        # Cycles' viewport puts the studio image behind a Vector Mapping rotated about Z, so its
+        # centre (Blender +X) shows at Rz^T @ X = -Y in Blender, +Z in the app volume.
+        np.testing.assert_allclose(environment.direction, (0.0, 0.0, 1.0), atol=1e-6)
+        np.testing.assert_allclose(environment.up, (0.0, 1.0, 0.0), atol=1e-6)
+        self.assertIsNone(world.studio_environment(source, pixels, 0.0, 0.0))
+
+    def test_capture_reads_the_studio_file_once_and_leaves_no_image(self):
+        folder = Path(bpy.utils.system_resource("DATAFILES", path="studiolights")) / "world"
+        path = str(next(iter(sorted(folder.glob("*.exr")))))
+        capture = sync.SceneCapture()
+        capture.shading = shading.Shading(
+            shading.MATERIAL, scene_lights=False, scene_world=False,
+            studio_light=path, studio_strength=1.5, studio_rotation=0.0,
+        )
+        images = len(bpy.data.images)
+        first = capture.capture_studio()
+        self.assertIsNotNone(first)
+        self.assertEqual(first.strength, 1.5)
+        self.assertEqual(len(bpy.data.images), images, "the studio image stayed in the file")
+        self.assertIs(capture.capture_studio().pixels, first.pixels)
+        snapshot = capture.capture(bpy.context.evaluated_depsgraph_get(), (), True)
+        self.assertEqual(snapshot.environment, first)
 
 
 class WorldEnvironmentTests(unittest.TestCase):

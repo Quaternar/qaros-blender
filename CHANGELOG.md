@@ -8,6 +8,14 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ## [Unreleased]
 
+### Added
+
+- Metal reflects its surroundings in the headset on VisGL, as in Blender's Material Preview and
+  EEVEE, instead of showing only the lamps' highlights. The stream lights the scene with the World's
+  environment image, and in Material Preview (and Rendered with the viewport's World option off)
+  with the viewport's studio HDRI, its intensity and rotation. Needs a QAROS whose VisGL has the
+  environment light; with an older one the stream looks as before.
+
 ## [0.5.2] - 2026-11-17
 
 ### Fixed

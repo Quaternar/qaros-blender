@@ -648,9 +648,15 @@ class Streamer:
         if not self.running or self.stopping or self.capture is None or self.worker is None:
             return
         wanted = wanted_shading()
-        if wanted == self.capture.shading:
+        current = self.capture.shading
+        if wanted == current and wanted.studio == current.studio:
             return
         self.capture.shading = wanted
+        if wanted == current:
+            # Only the studio HDRI's intensity or rotation: the lights again, no geometry.
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            self.worker.submit(self.capture.capture(depsgraph, (), False))
+            return
         log(f"shading: {shading.LABELS[wanted.mode]}")
         self.resync()
 

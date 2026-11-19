@@ -25,7 +25,7 @@ from .materials import (
     material_key,
 )
 from .shading import WIRE_KEY, WIRE_MATERIAL, Shading, shaded_description, wire_radius
-from .world import world_environment
+from .world import image_pixels, image_source, studio_environment, world_environment
 
 # Blender world (Z up, -Y forward) -> app volume (Y up, -Z forward): (x, y, z) -> (x, z, -y).
 Z_UP_TO_Y_UP = np.array(
@@ -401,6 +401,33 @@ def scene_bounds(depsgraph):
     return points.min(axis=0).tolist(), points.max(axis=0).tolist()
 
 
+class StudioImage:
+    """A studio HDRI's pixels, copied once from the image Blender loaded, with the attributes
+    world.image_pixels and world.image_source read: the image itself is removed again."""
+
+    class Colorspace:
+        def __init__(self, name):
+            self.name = name
+
+    class Pixels:
+        def __init__(self, values):
+            self.values = values
+
+        def foreach_get(self, out):
+            out[:] = self.values
+
+    def __init__(self, image):
+        self.name = image.name
+        self.filepath_raw = image.filepath_raw
+        self.size = tuple(image.size)
+        self.channels = image.channels
+        self.is_float = bool(image.is_float)
+        self.colorspace_settings = self.Colorspace(image.colorspace_settings.name)
+        values = np.empty(self.size[0] * self.size[1] * self.channels, dtype=np.float32)
+        image.pixels.foreach_get(values)
+        self.pixels = self.Pixels(values)
+
+
 class SceneCapture:
     """UI thread: reads the depsgraph into snapshots. Remembers which objects it has sent, so an
     object is extracted again only when its geometry changed or it is new."""
@@ -415,6 +442,7 @@ class SceneCapture:
         self.material_support = material_support
         self.on_warning = on_warning
         self.environment_pixels = {}  # the World image's source -> its pixels, read once
+        self.studio_images = {}  # the studio HDRI's path -> (source, pixels), read once
         self.world_reported = set()  # World warnings already logged
         # How the stream shades (shading.py). A change takes a full capture: Streamer.follow_shading.
         self.shading = Shading()
@@ -469,7 +497,10 @@ class SceneCapture:
                     snapshot.lights.append(light)
         self.unstreamed = unstreamed
         self.meshes = {name: parts for name, parts in self.meshes.items() if name in seen}
-        snapshot.environment = self.capture_environment(depsgraph.scene) if self.shading.scene_world else None
+        if self.shading.scene_world:
+            snapshot.environment = self.capture_environment(depsgraph.scene)
+        else:
+            snapshot.environment = self.capture_studio()
         # Solid and Wireframe replace the exported materials (shading.shaded_description).
         descriptions = {
             key: shaded_description(key, description, self.shading)
@@ -483,6 +514,35 @@ class SceneCapture:
         used_keys = {part[3] for parts in self.meshes.values() if parts for part in parts}
         self.diagnostics.update(self.materials, used_keys, self.material_support)
         return snapshot
+
+    def capture_studio(self):
+        """The viewport's studio HDRI (Material Preview, or Rendered without the World), or None.
+        Its file is read once per path; the image is loaded only for that and removed again, so
+        it never shows in the user's file."""
+        path = self.shading.studio_light
+        if not path:
+            return None
+        cached = self.studio_images.get(path)
+        if cached is None:
+            try:
+                import bpy
+
+                loaded = bpy.data.images.load(path, check_existing=False)
+            except Exception as error:  # noqa: BLE001 - the scene then goes without the studio light
+                if path not in self.world_reported:
+                    self.world_reported.add(path)
+                    if self.on_warning is not None:
+                        self.on_warning(f"Studio light {path} cannot be read: {error}")
+                return None
+            try:
+                image = StudioImage(loaded)
+            finally:
+                bpy.data.images.remove(loaded)
+            cached = (image_source(image), image_pixels(image))
+            self.studio_images.clear()
+            self.studio_images[path] = cached
+        source, pixels = cached
+        return studio_environment(source, pixels, self.shading.studio_strength, self.shading.studio_rotation)
 
     def capture_environment(self, scene):
         """The scene's World as a plain environment; each reason it is approximated is logged once."""
@@ -576,9 +636,12 @@ class SceneMirror:
         # Before publishing the first frame: no target can hold the backend gate yet. Later
         # material updates and panel redraws use this copied metadata, never query the backend.
         self.material_support = renderer_material_support(matte_only, device.material_support())
-        # The World becomes an hdri light only where one can light the scene: VisGL has no hdri
-        # light, and OSPRay's SciVis renderer ignores one.
-        self.environment_support = subtype != "scivis" and device.environment_support()
+        # The World becomes an hdri light only where one can light the scene: OSPRay's SciVis
+        # renderer ignores one, and VisGL has one only from the QAROS build on (lighting only,
+        # never drawn, so it advertises no `visible`).
+        self.environment_support = subtype != "scivis" and device.environment_support(
+            require_visible=backend != "visgl"
+        )
         self.world = device.new("World")
         self.renderer_subtype = subtype
         self.renderer = device.new("Renderer", subtype)
