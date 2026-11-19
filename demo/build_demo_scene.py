@@ -154,7 +154,8 @@ def build_engine(collection, parent):
 
 def material(name, color, metallic=0.0, roughness=0.5):
     mat = bpy.data.materials.new(name)
-    mat.use_nodes = True
+    if bpy.app.version < (5, 0, 0):  # from Blender 5 every material has its node tree
+        mat.use_nodes = True
     node = mat.node_tree.nodes["Principled BSDF"]
     node.inputs["Base Color"].default_value = (*color, 1.0)
     node.inputs["Metallic"].default_value = metallic
