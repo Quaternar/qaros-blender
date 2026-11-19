@@ -8,6 +8,8 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-19
+
 ### Added
 
 - Metal reflects its surroundings in the headset on VisGL, as in Blender's Material Preview and
