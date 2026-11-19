@@ -121,7 +121,8 @@ class BindingTests(unittest.TestCase):
         print(f"Material capabilities: {support.subtype}; alpha modes: {sorted(support.alpha_modes)}")
 
     def test_environment_light_through_the_proxy(self):
-        supported = self.device.environment_support()
+        backend = self.device.property_string("qar.backend")
+        supported = self.device.environment_support(require_visible=backend != "visgl")
         self.assertEqual(supported and "hdri" in self.device.object_subtypes(anari.LIGHT), supported)
         if not supported:
             print(f"Environment light: none ({self.device.property_string('qar.backend')})")
@@ -297,8 +298,8 @@ class EnvironmentSupportTests(unittest.TestCase):
     """The World is streamed only to an hdri light advertising radiance and visible: an environment
     the camera does not see."""
 
-    def support(self, lights):
-        return anari.Device(MetadataAPI(lights), 123).environment_support()
+    def support(self, lights, require_visible=True):
+        return anari.Device(MetadataAPI(lights), 123).environment_support(require_visible)
 
     def test_an_hdri_light_with_radiance_and_visible(self):
         self.assertTrue(self.support({
@@ -311,6 +312,12 @@ class EnvironmentSupportTests(unittest.TestCase):
         # VisRTX 26.09: reads visible without advertising it, and lights nothing with it off.
         self.assertFalse(self.support({"hdri": [("radiance", anari.ARRAY2D), ("scale", anari.FLOAT32)]}))
         self.assertFalse(self.support({"hdri": [("radiance", anari.ARRAY1D), ("visible", anari.BOOL)]}))
+
+    def test_a_light_only_hdri_needs_no_visible_where_the_backend_never_draws_it(self):
+        # VisGL (QAROS build): the hdri light only lights, so it advertises no visible.
+        radiance_only = {"hdri": [("radiance", anari.ARRAY2D), ("scale", anari.FLOAT32)]}
+        self.assertTrue(self.support(radiance_only, require_visible=False))
+        self.assertFalse(self.support({"directional": [("irradiance", anari.FLOAT32)]}, require_visible=False))
 
 
 if __name__ == "__main__":

@@ -30,7 +30,7 @@ class RecordingDevice:
     def material_support(self):
         return self.support
 
-    def environment_support(self):
+    def environment_support(self, require_visible=True):
         return False
 
     def new(self, kind, subtype=None):

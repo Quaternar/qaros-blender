@@ -135,6 +135,22 @@ def uniform(color, strength, warnings=()):
     return Environment(("colour",) + color, pixels, strength, warnings=tuple(warnings))
 
 
+def studio_environment(source, pixels, strength, rotation):
+    """Blender's viewport studio HDRI (`pixels` as image_pixels reads them, from `source`) as an
+    environment, or None without pixels. Blender maps it like a World's Environment Texture
+    behind a Vector Mapping rotated by `rotation` about Z (Cycles' viewport builds exactly that),
+    so its centre faces Rz(rotation)^T @ X."""
+    if strength <= 0.0 or pixels is None:
+        return None
+    turned = _euler_matrix((0.0, 0.0, rotation)).T
+    direction = _Z_UP_TO_Y_UP @ (turned @ np.array([1.0, 0.0, 0.0]))
+    up = _Z_UP_TO_Y_UP @ np.array([0.0, 0.0, 1.0])
+    return Environment(
+        ("studio",) + tuple(source), pixels, float(strength),
+        tuple(float(v) for v in direction), tuple(float(v) for v in up),
+    )
+
+
 def world_environment(world, cache=None):
     """The environment `world` lights the scene with, or None (no World, a black one, or strength
     0). `cache` maps a source to its pixels, so an image is read again only when it changed; it is

@@ -67,10 +67,17 @@ sequenceDiagram
 - **World** (`world.py`): the World's equirectangular Environment Texture or plain colour, with
   strength and Mapping rotation, copied on the UI thread (pixels read once per image, averaged
   down to 1024 columns) and sent as an `hdri` light with `visible` off, only when the device
-  advertises an hdri light with `radiance` and `visible` (`Device.environment_support`) and the
-  renderer is not OSPRay's SciVis. VisGL has none (`anariNewLight("hdri")` returns null there);
-  VisRTX 26.09 does not advertise `visible`, and with it off lights nothing and turns matte
-  surfaces to grain; SciVis ignores hdri lights.
+  advertises an hdri light with `radiance` and `visible` (`Device.environment_support`), or is
+  VisGL, and the renderer is not OSPRay's SciVis. VisGL's hdri light (QAROS's VisGL patch) only
+  lights and is never drawn, so it advertises no `visible`; an older VisGL has none
+  (`anariNewLight("hdri")` returns null there). VisRTX 26.09 does not advertise `visible`, and
+  with it off lights nothing and turns matte surfaces to grain; SciVis ignores hdri lights.
+- **Studio HDRI** (`SceneCapture.capture_studio`, `shading.Shading.studio_*`): Material Preview,
+  and Rendered without the viewport's World option, take the viewport's studio HDRI
+  (`selected_studio_light.path`, `studiolight_intensity`, `studiolight_rotate_z`) in place of the
+  World. The file is loaded once into Blender only to read its pixels, then removed. Its rotation
+  maps like a Vector Mapping about Z (Cycles' viewport). Intensity and rotation are not part of
+  the shading's equality: a change of only those sends the lights again, not the scene.
 - **Backend order:** Automatic sets `QAR_ANARI_BACKEND_ORDER=visgl,visrtx,ospray,helide` before
   the library loads (kept when already set); a qaros without that variable keeps its own order.
 - **Renderer switch** (`Streamer.load_library`, `QAROS_OT_set_backend`): qaros chooses its backend

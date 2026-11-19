@@ -7,9 +7,9 @@ tested; `from_view` reads a View3DShading duck-typed.
 |---|---|
 | Wireframe | the mesh edges as thin cylinders, one light grey matte material, studio light |
 | Solid | matte, in Blender's solid colour (material viewport colour, or the single colour), studio light |
-| Material Preview | the exported materials; scene lights and World only when the viewport uses them |
-| Rendered | the exported materials, scene lights and World (the stream before this mode existed) |"""
-from dataclasses import dataclass
+| Material Preview | the exported materials; scene lights and World only when the viewport uses them, else the viewport's studio HDRI |
+| Rendered | the exported materials, scene lights and World (the stream before this mode existed), or the studio HDRI when the viewport leaves the World out |"""
+from dataclasses import dataclass, field
 
 from .materials import COLOR_KEY_PREFIX, MaterialDescription
 
@@ -43,10 +43,35 @@ class Shading:
     single_color: tuple = SOLID_GREY  # Solid only, color_type SINGLE
     scene_lights: bool = True
     scene_world: bool = True
+    # Material Preview, and Rendered without the scene World: Blender lights the viewport with a
+    # studio HDRI (its file, intensity and Z rotation), which the stream takes in place of the
+    # World. Intensity and rotation change no geometry, so they stay out of the comparison:
+    # Streamer.follow_shading sends only the lights again when just they change.
+    studio_light: str = ""
+    studio_strength: float = field(default=1.0, compare=False)
+    studio_rotation: float = field(default=0.0, compare=False)
 
     @property
     def wire(self):
         return self.mode == WIREFRAME
+
+    @property
+    def studio(self):
+        """Everything about the studio HDRI, for telling a changed intensity or rotation apart."""
+        return (self.studio_light, self.studio_strength, self.studio_rotation)
+
+
+def _studio(view):
+    """The viewport's studio HDRI as Shading fields; none when the view names no file."""
+    light = getattr(view, "selected_studio_light", None)
+    path = str(getattr(light, "path", "") or "")
+    if not path:
+        return {}
+    return dict(
+        studio_light=path,
+        studio_strength=round(float(getattr(view, "studiolight_intensity", 1.0)), 4),
+        studio_rotation=round(float(getattr(view, "studiolight_rotate_z", 0.0)), 4),
+    )
 
 
 def from_view(view, mode=None):
@@ -64,11 +89,16 @@ def from_view(view, mode=None):
     if mode == MATERIAL:
         if view is None:
             return Shading(MATERIAL, scene_lights=False, scene_world=False)
-        return Shading(MATERIAL, scene_lights=bool(view.use_scene_lights), scene_world=bool(view.use_scene_world))
+        world = bool(view.use_scene_world)
+        return Shading(
+            MATERIAL, scene_lights=bool(view.use_scene_lights), scene_world=world, **({} if world else _studio(view))
+        )
     if view is None:
         return Shading(RENDERED)
+    world = bool(view.use_scene_world_render)
     return Shading(
-        RENDERED, scene_lights=bool(view.use_scene_lights_render), scene_world=bool(view.use_scene_world_render)
+        RENDERED, scene_lights=bool(view.use_scene_lights_render), scene_world=world,
+        **({} if world else _studio(view)),
     )
 
 

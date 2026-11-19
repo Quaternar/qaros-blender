@@ -40,6 +40,42 @@ PRINCIPLED = materials.MaterialDescription(
 )
 
 
+def studio_view(mode, **values):
+    values.setdefault("selected_studio_light", SimpleNamespace(path="C:/Blender/studiolights/world/forest.exr"))
+    values.setdefault("studiolight_intensity", 1.25)
+    values.setdefault("studiolight_rotate_z", 0.5)
+    return view(mode, **values)
+
+
+class StudioLightTests(unittest.TestCase):
+    def test_material_preview_without_the_world_takes_the_studio_hdri(self):
+        stream = shading.from_view(studio_view(shading.MATERIAL))
+        self.assertEqual(stream.studio, ("C:/Blender/studiolights/world/forest.exr", 1.25, 0.5))
+        self.assertFalse(stream.scene_world)
+
+    def test_rendered_without_the_world_takes_it_too(self):
+        stream = shading.from_view(studio_view(shading.RENDERED, use_scene_world_render=False))
+        self.assertEqual(stream.studio_light, "C:/Blender/studiolights/world/forest.exr")
+
+    def test_the_scene_world_replaces_the_studio_hdri(self):
+        for stream in (
+            shading.from_view(studio_view(shading.MATERIAL, use_scene_world=True)),
+            shading.from_view(studio_view(shading.RENDERED)),
+            shading.from_view(studio_view(shading.SOLID)),
+        ):
+            self.assertEqual(stream.studio_light, "")
+
+    def test_intensity_and_rotation_do_not_count_as_another_shading(self):
+        first = shading.from_view(studio_view(shading.MATERIAL))
+        turned = shading.from_view(studio_view(shading.MATERIAL, studiolight_rotate_z=1.0, studiolight_intensity=2.0))
+        other = shading.from_view(studio_view(
+            shading.MATERIAL, selected_studio_light=SimpleNamespace(path="C:/Blender/studiolights/world/city.exr")
+        ))
+        self.assertEqual(first, turned)
+        self.assertNotEqual(first.studio, turned.studio)
+        self.assertNotEqual(first, other)
+
+
 class FromViewTests(unittest.TestCase):
     def test_without_a_viewport_the_stream_renders_as_before(self):
         self.assertEqual(shading.from_view(None), shading.Shading())

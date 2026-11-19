@@ -293,16 +293,19 @@ class Device:
             return preferred
         raise AnariError("No usable ANARI material: " + "; ".join(rejected))
 
-    def environment_support(self):
+    def environment_support(self, require_visible=True):
         """Whether the backend can light the scene with an environment image it does not draw: an
-        `hdri` light advertising `radiance` and `visible` (OSPRay). VisGL has no hdri light;
-        VisRTX 26.09 reads `visible` without advertising it, and an hdri light with `visible` off
-        lights nothing there and turns matte surfaces into grain. Queried once, like
-        material_support."""
+        `hdri` light advertising `radiance`, and `visible` unless `require_visible` is False.
+        OSPRay advertises both. VisRTX 26.09 reads `visible` without advertising it, and an hdri
+        light with `visible` off lights nothing there and turns matte surfaces into grain. VisGL
+        (QAROS build) has an hdri light that only lights and is never drawn, so it needs no
+        `visible`; an older VisGL has no hdri light. Queried once, like material_support."""
         if "hdri" not in self.object_subtypes(LIGHT):
             return False
         parameters = self.object_parameters(LIGHT, "hdri")
-        return ("radiance", ARRAY2D) in parameters and ("visible", BOOL) in parameters
+        if ("radiance", ARRAY2D) not in parameters:
+            return False
+        return not require_visible or ("visible", BOOL) in parameters
 
     def new(self, kind, subtype=None):
         constructor = getattr(self.api, f"anariNew{kind}")
