@@ -35,7 +35,7 @@ from .volume_name import choose_volume, conflict_message, streaming_note
 bl_info = {
     "name": "QAROS ANARI Streaming",
     "author": "Quaternar",
-    "version": (0, 6, 1),
+    "version": (0, 6, 2),
     "blender": (4, 5, 0),
     "location": "3D View > Sidebar > QAROS",
     "description": "Streams the scene to QAROS headsets through the qaros ANARI device",

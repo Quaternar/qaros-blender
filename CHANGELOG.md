@@ -8,6 +8,8 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-19
+
 ### Fixed
 
 - Blender 5 no longer prints a `use_nodes` deprecation warning while the add-on reads materials and
