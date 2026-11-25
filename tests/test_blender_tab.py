@@ -142,21 +142,27 @@ class TabTests(unittest.TestCase):
 
     def test_every_outlined_object_reads_outlined_while_streaming(self):
         streamer = qaros_anari.STREAMER
-        saved = streamer.device, streamer.capture, streamer.selection
+        saved = streamer.device, streamer.capture, streamer.selection, streamer.backend
         try:
-            streamer.device, streamer.capture = object(), None
+            streamer.device, streamer.capture, streamer.backend = object(), None, "visrtx"
             streamer.selection = ("Root", "Cube")  # a model root selected: it and its parts
             outlined = ("RESTRICT_SELECT_OFF", "Streamed, outlined in the headset", False)
             self.assertEqual(qaros_anari.object_status(bpy.data.objects["Cube"]), outlined)
             self.assertEqual(
                 qaros_anari.object_status(bpy.data.objects["Light"]), ("CHECKMARK", "Streamed", False)
             )
+            streamer.backend = "visgl"
+            self.assertEqual(
+                qaros_anari.object_status(bpy.data.objects["Cube"]),
+                ("RESTRICT_SELECT_OFF", "Streamed, selected (VisGL draws no outline)", False),
+                "VisGL draws no outline",
+            )
             streamer.selection = ()
             self.assertEqual(
                 qaros_anari.object_status(bpy.data.objects["Cube"]), ("CHECKMARK", "Streamed", False)
             )
         finally:
-            streamer.device, streamer.capture, streamer.selection = saved
+            streamer.device, streamer.capture, streamer.selection, streamer.backend = saved
 
     def test_the_object_properties_tab_has_a_qaros_panel(self):
         panel = qaros_anari.QAROS_PT_object_properties

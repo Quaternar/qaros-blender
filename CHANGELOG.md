@@ -8,6 +8,12 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ## [Unreleased]
 
+### Fixed
+
+- **Active Object** no longer says the selection is outlined in the headset on VisGL, which draws no
+  outline: there it reads **Streamed, selected (VisGL draws no outline)**. VisRTX, OSPRay and Helide
+  keep **Streamed, outlined in the headset**.
+
 ## [0.6.3] - 2026-11-25
 
 ### Fixed

@@ -371,6 +371,8 @@ def tag_redraw():
 # fraction of a second once it is filled. Building them on Blender's UI thread froze Blender for that long.
 WARM_BACKENDS = frozenset({"visrtx"})
 WARMUP_TIMEOUT_S = 600.0
+# Backends that report no per-pixel id channel, so the device draws no selection outline with them.
+NO_OUTLINE_BACKENDS = frozenset({"visgl"})
 SWITCH_POLL_INTERVAL = 0.25
 LIBRARY_LOCK = threading.Lock()
 
@@ -1258,6 +1260,8 @@ def object_status(obj):
     if not STREAMER.running:
         return "CHECKMARK", "Streams when streaming starts", False
     if obj.name in (STREAMER.selection or ()):
+        if STREAMER.backend in NO_OUTLINE_BACKENDS:
+            return "RESTRICT_SELECT_OFF", f"Streamed, selected ({BACKEND_LABELS[STREAMER.backend]} draws no outline)", False
         return "RESTRICT_SELECT_OFF", "Streamed, outlined in the headset", False
     return "CHECKMARK", "Streamed", False
 
