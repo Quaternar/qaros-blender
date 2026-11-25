@@ -8,6 +8,8 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-11-25
+
 ### Fixed
 
 - **Active Object** no longer says the selection is outlined in the headset on VisGL, which draws no
