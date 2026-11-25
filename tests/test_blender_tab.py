@@ -140,6 +140,24 @@ class TabTests(unittest.TestCase):
         self.assertIn(("prop", "qaros_stream", "HIDE_ON"), drawn)
         self.assertIn(("label", "Left out of the stream", "HIDE_ON"), drawn)
 
+    def test_every_outlined_object_reads_outlined_while_streaming(self):
+        streamer = qaros_anari.STREAMER
+        saved = streamer.device, streamer.capture, streamer.selection
+        try:
+            streamer.device, streamer.capture = object(), None
+            streamer.selection = ("Root", "Cube")  # a model root selected: it and its parts
+            outlined = ("RESTRICT_SELECT_OFF", "Streamed, outlined in the headset", False)
+            self.assertEqual(qaros_anari.object_status(bpy.data.objects["Cube"]), outlined)
+            self.assertEqual(
+                qaros_anari.object_status(bpy.data.objects["Light"]), ("CHECKMARK", "Streamed", False)
+            )
+            streamer.selection = ()
+            self.assertEqual(
+                qaros_anari.object_status(bpy.data.objects["Cube"]), ("CHECKMARK", "Streamed", False)
+            )
+        finally:
+            streamer.device, streamer.capture, streamer.selection = saved
+
     def test_the_object_properties_tab_has_a_qaros_panel(self):
         panel = qaros_anari.QAROS_PT_object_properties
         self.assertEqual((panel.bl_space_type, panel.bl_context), ("PROPERTIES", "object"))

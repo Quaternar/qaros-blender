@@ -465,7 +465,7 @@ class Streamer:
         self.panel_error = None
         self.targets_parameter = None  # the qar.targets value last given to the device
         self.targets_cache = (0.0, None)  # (read at, SessionTargets or None)
-        self.selection = None  # the object the stream outlines (qar.selection), as last handed over
+        self.selection = None  # the names the stream outlines (qar.selection), as last handed over
 
     @property
     def running(self):
@@ -1257,7 +1257,7 @@ def object_status(obj):
         return "INFO", "Nothing to stream", False
     if not STREAMER.running:
         return "CHECKMARK", "Streams when streaming starts", False
-    if obj.name == STREAMER.selection:
+    if obj.name in (STREAMER.selection or ()):
         return "RESTRICT_SELECT_OFF", "Streamed, outlined in the headset", False
     return "CHECKMARK", "Streamed", False
 

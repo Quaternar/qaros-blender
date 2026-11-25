@@ -8,6 +8,12 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ## [Unreleased]
 
+### Fixed
+
+- **Active Object** reads **Streamed, outlined in the headset** again for every object the stream
+  outlines: the selected object and, for a model's root, each of its parts. Since 0.5.2 it read
+  only **Streamed** ([#10](https://github.com/Quaternar/qaros-blender/issues/10)).
+
 ## [0.6.2] - 2026-11-19
 
 ### Fixed
