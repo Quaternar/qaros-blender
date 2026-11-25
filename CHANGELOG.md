@@ -8,6 +8,8 @@ to `bl_info["version"]`, and the release tag `vX.Y.Z`; how a version is released
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-11-25
+
 ### Fixed
 
 - **Active Object** reads **Streamed, outlined in the headset** again for every object the stream
